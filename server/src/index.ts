@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import './db/index.js';
 import { departmentsRouter, unitsRouter, accountsRouter, materialsRouter, materialTaxonomyRouter } from './routes/masters.js';
 import { indentsRouter } from './routes/indents.js';
@@ -33,6 +36,19 @@ app.use('/api/grns', grnsRouter);
 
 // Reports
 app.use('/api/reports', reportsRouter);
+
+// Serve the built client (client/dist) when present — a single-service
+// deploy (e.g. Railway/Render) runs `npm run build` first, which produces
+// this directory; local dev instead runs the Vite dev server separately
+// on :5173 and proxies /api here, so this simply finds nothing and no-ops.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const clientDist = join(__dirname, '..', '..', 'client', 'dist');
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get(/^(?!\/api).*/, (_req, res) => {
+    res.sendFile(join(clientDist, 'index.html'));
+  });
+}
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   // eslint-disable-next-line no-console
