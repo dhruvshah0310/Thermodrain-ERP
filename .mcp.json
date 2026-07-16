@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "video-analyzer": {
+      "command": "npx",
+      "args": ["-y", "mcp-video-analyzer@latest"],
+      "env": {
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+        "TWELVELABS_API_KEY": "${TWELVELABS_API_KEY}",
+        "WHISPER_MODEL": "small",
+        "WHISPER_LANGUAGE": "en"
+      }
+    }
+  }
+}
