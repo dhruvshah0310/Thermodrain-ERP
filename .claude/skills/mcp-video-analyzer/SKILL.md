@@ -45,3 +45,31 @@ a hard error.
   re-running a full analysis.
 - Results are cached in-memory for ~10 minutes per source; re-analyzing the same URL shortly
   after is cheap.
+
+## Troubleshooting in this environment
+
+The `video-analyzer` MCP server sometimes fails to spin up at all (deferred tool search finds
+nothing) or `npx mcp-video-analyzer@latest analyze ...` silently exits 1 with no error. Two
+known causes here, both worked around successfully on 2026-07-16:
+
+- **`ffmpeg-static`'s postinstall fails.** It downloads a prebuilt ffmpeg binary from a GitHub
+  releases URL, which this environment's egress policy blocks (403). Fix: install system ffmpeg
+  instead (`apt-get update && apt-get install -y --no-install-recommends ffmpeg`, needs a
+  fiddly `apt-get update` first if the mirror has drifted), then point the package at it via
+  `FFMPEG_BIN=/usr/bin/ffmpeg` — `ffmpeg-static`'s `index.js` reads that env var before trying
+  its own bundled binary path.
+- **OCR crashes the whole analysis.** `tesseract.js` fetches its language data from a CDN at
+  *runtime* (not at npm install time), which is also blocked, and an uncaught worker-thread
+  error kills the whole `analyze` process rather than degrading gracefully. Workaround: run
+  `analyze` without OCR-dependent detail, or just extract frames directly with system ffmpeg
+  (`ffmpeg -i <video> -vf fps=1/N f_%03d.jpg`) and read them with the Read tool — for a UI
+  screen-recording (as opposed to natural video), reading frames directly is just as good as
+  OCR and doesn't need any network calls at all.
+- Also needed: `NODE_USE_ENV_PROXY=1` on any `npm install`/`npx` invocation, since Node's
+  built-in `fetch` (used by `ffmpeg-static`'s installer and others) doesn't read `HTTPS_PROXY`
+  by default on Node ≥22.21.
+- If you need the package installed without its (broken) postinstall script at all:
+  `npm install mcp-video-analyzer@latest --ignore-scripts`, then run
+  `node node_modules/mcp-video-analyzer/dist/index.js analyze <path> [options]` directly
+  (its `dist/cli.js` only exports functions — `dist/index.js` is the real entry point that
+  dispatches the `analyze` subcommand).

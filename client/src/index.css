@@ -1,0 +1,66 @@
+/* Thermodrain ERP — Steel design tokens (Variation A from the design handoff). */
+:root {
+  --td-bg: #f4f5f7;
+  --td-surface: #ffffff;
+  --td-dark: #1c2129;
+  --td-dark-2: #262c38;
+  --td-accent: #e8703a;
+  --td-accent-soft: #fff8f4;
+  --td-text: #1c2129;
+  --td-text-secondary: #6b7284;
+  --td-text-muted: #8a8f99;
+  --td-text-on-dark-muted: #9aa2b1;
+  --td-border: #e3e5e9;
+  --td-divider: #f0f1f3;
+  --td-blue: #3d6fa8;
+  --td-blue-bg: #eaf1f9;
+  --td-green: #5a9c5f;
+  --td-green-bg: #eaf6ea;
+  --td-amber: #c98a1c;
+  --td-amber-bg: #fdf3e2;
+  --td-red: #c0392b;
+  --td-red-bg: #fbeae8;
+  --td-gray: #6a6f78;
+  --td-radius-sm: 4px;
+  --td-radius: 6px;
+  --td-font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+}
+
+body {
+  background: var(--td-bg);
+  font-family: var(--td-font);
+  color: var(--td-text);
+}
+
+a { color: var(--td-blue); text-decoration: none; }
+a:hover { color: #2a5688; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #c7cbd1; border-radius: 4px; }
+
+table { border-collapse: collapse; width: 100%; }
+
+button { font-family: inherit; }
+
+input, select, textarea {
+  font-family: inherit;
+  font-size: 12.5px;
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius-sm);
+  padding: 7px 9px;
+  color: var(--td-text);
+  background: var(--td-surface);
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--td-accent);
+}
