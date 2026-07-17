@@ -30,15 +30,13 @@ final class JarvisController {
     }
 
     /// Resolve the API key, in priority order:
-    ///   1. the macOS Keychain (set via the menu dialog),
-    ///   2. the `ANTHROPIC_API_KEY` environment variable (easiest when launching from Terminal —
-    ///      Terminal paste works even when the app's dialog won't accept it),
-    ///   3. a plaintext file at `~/JarvisAssistant/api-key.txt`.
-    /// If found via 2 or 3, it's copied into the Keychain so it persists for future launches.
+    ///   1. the `ANTHROPIC_API_KEY` environment variable (easiest when launching from Terminal —
+    ///      Terminal paste works even when the app's dialog won't accept it). Checked first so it
+    ///      can overwrite a wrong key that's already stuck in the Keychain.
+    ///   2. a plaintext file at `~/JarvisAssistant/api-key.txt`.
+    ///   3. the macOS Keychain (set via the menu dialog or persisted from 1/2 on a prior launch).
+    /// If found via 1 or 2, it's copied into the Keychain so it persists for future launches.
     private static func resolveAPIKey() -> String? {
-        if let key = KeychainStore.loadAPIKey(), !key.isEmpty {
-            return key
-        }
         if let env = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
             .trimmingCharacters(in: .whitespacesAndNewlines), !env.isEmpty {
             KeychainStore.saveAPIKey(env)
@@ -53,6 +51,9 @@ final class JarvisController {
                 Logger.shared.log("Loaded API key from \(fileURL.path) and saved it to the Keychain.")
                 return key
             }
+        }
+        if let key = KeychainStore.loadAPIKey(), !key.isEmpty {
+            return key
         }
         return nil
     }
