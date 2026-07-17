@@ -18,6 +18,15 @@ struct Config: Codable {
     // Seconds Jarvis waits, after hearing the wake word, for you to actually start your command
     // before giving up and going back to idle. Raise this if you need more time to think.
     var commandStartTimeout: Double
+    // After Jarvis replies, keep listening for a follow-up command without needing the wake word
+    // again, so a back-and-forth conversation flows naturally.
+    var conversationMode: Bool
+    // Seconds to keep listening for a follow-up after a reply before returning to wake-word mode.
+    var followUpWindow: Double
+    // Speak a greeting when the app launches (e.g. at login).
+    var greetOnLaunch: Bool
+    // Optional name for a personalized greeting, e.g. "Good morning, Dhruv." Leave null for none.
+    var userName: String?
 
     static let `default` = Config(
         // Claude Code's internal short model names (e.g. "claude-sonnet-5") don't always match the
@@ -36,7 +45,11 @@ struct Config: Codable {
         maxToolIterations: 6,
         launchAtLogin: false,
         silenceTimeout: 2.0,
-        commandStartTimeout: 6.0
+        commandStartTimeout: 6.0,
+        conversationMode: true,
+        followUpWindow: 8.0,
+        greetOnLaunch: true,
+        userName: nil
     )
 
     // Resilient decoding: any key missing from an older config.json falls back to the default,
@@ -57,13 +70,18 @@ struct Config: Codable {
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
         silenceTimeout = try c.decodeIfPresent(Double.self, forKey: .silenceTimeout) ?? d.silenceTimeout
         commandStartTimeout = try c.decodeIfPresent(Double.self, forKey: .commandStartTimeout) ?? d.commandStartTimeout
+        conversationMode = try c.decodeIfPresent(Bool.self, forKey: .conversationMode) ?? d.conversationMode
+        followUpWindow = try c.decodeIfPresent(Double.self, forKey: .followUpWindow) ?? d.followUpWindow
+        greetOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .greetOnLaunch) ?? d.greetOnLaunch
+        userName = try c.decodeIfPresent(String.self, forKey: .userName) ?? d.userName
     }
 
     private init(
         model: String, wakeWord: String, voiceIdentifier: String?, speechRate: Float,
         allowShellCommands: Bool, allowAppleScript: Bool, allowOpenApps: Bool, allowFileAccess: Bool,
         workspaceDirectory: String, maxToolIterations: Int, launchAtLogin: Bool,
-        silenceTimeout: Double, commandStartTimeout: Double
+        silenceTimeout: Double, commandStartTimeout: Double,
+        conversationMode: Bool, followUpWindow: Double, greetOnLaunch: Bool, userName: String?
     ) {
         self.model = model
         self.wakeWord = wakeWord
@@ -78,6 +96,10 @@ struct Config: Codable {
         self.launchAtLogin = launchAtLogin
         self.silenceTimeout = silenceTimeout
         self.commandStartTimeout = commandStartTimeout
+        self.conversationMode = conversationMode
+        self.followUpWindow = followUpWindow
+        self.greetOnLaunch = greetOnLaunch
+        self.userName = userName
     }
 
     var workspaceURL: URL {

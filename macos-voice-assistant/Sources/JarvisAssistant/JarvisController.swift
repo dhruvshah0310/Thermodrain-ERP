@@ -26,7 +26,8 @@ final class JarvisController {
         speechEngine = SpeechEngine(
             wakeWord: config.wakeWord,
             silenceTimeout: config.silenceTimeout,
-            commandStartTimeout: config.commandStartTimeout
+            commandStartTimeout: config.commandStartTimeout,
+            followUpWindow: config.followUpWindow
         )
         executor = ToolExecutor(config: config)
         try? FileManager.default.createDirectory(at: config.workspaceURL, withIntermediateDirectories: true)
@@ -108,9 +109,41 @@ final class JarvisController {
                 try self.speechEngine.start()
                 Logger.shared.log("Listening for wake word '\(self.config.wakeWord)'")
                 self.statusBar.setState(.idleListening)
+                self.greetIfEnabled()
             } catch {
                 Logger.shared.log("Failed to start speech engine: \(error.localizedDescription)")
                 self.statusBar.setState(.error)
+            }
+        }
+    }
+
+    private func greetIfEnabled() {
+        guard config.greetOnLaunch else { return }
+        let hour = Calendar.current.component(.hour, from: Date())
+        let part: String
+        switch hour {
+        case 5..<12: part = "Good morning"
+        case 12..<17: part = "Good afternoon"
+        case 17..<22: part = "Good evening"
+        default: part = "Hello"
+        }
+        let name = config.userName.map { ", \($0)" } ?? ""
+        speak("\(part)\(name). Jarvis is online and ready.")
+    }
+
+    /// Speak text, muting the mic while talking so Jarvis doesn't transcribe its own voice, then
+    /// either arm a follow-up (conversation mode, so no wake word is needed for the next command)
+    /// or return to wake-word idle.
+    private func speak(_ text: String) {
+        speechEngine.setMuted(true)
+        statusBar.setState(.speaking)
+        speechOutput.speak(text, voiceIdentifier: config.voiceIdentifier, rate: config.speechRate) { [weak self] in
+            guard let self else { return }
+            self.speechEngine.setMuted(false)
+            if self.config.conversationMode {
+                self.speechEngine.armFollowUp()
+            } else {
+                self.statusBar.setState(.idleListening)
             }
         }
     }
@@ -130,14 +163,7 @@ final class JarvisController {
 
         guard let apiKey else {
             Logger.shared.log("No API key set — open the menu bar icon and choose 'Set Anthropic API Key…'.")
-            statusBar.setState(.speaking)
-            speechOutput.speak(
-                "I don't have an API key yet. Set one from my menu bar icon.",
-                voiceIdentifier: config.voiceIdentifier,
-                rate: config.speechRate
-            ) { [weak self] in
-                self?.statusBar.setState(.idleListening)
-            }
+            speak("I don't have an API key yet. Set one from my menu bar icon.")
             return
         }
 
@@ -156,13 +182,12 @@ final class JarvisController {
                     executor: executor
                 )
                 Logger.shared.log("Reply: \(reply)")
-                await MainActor.run { self.statusBar.setState(.speaking) }
-                speechOutput.speak(reply, voiceIdentifier: config.voiceIdentifier, rate: config.speechRate) { [weak self] in
-                    self?.statusBar.setState(.idleListening)
-                }
+                await MainActor.run { self.speak(reply) }
             } catch {
                 Logger.shared.log("Claude error: \(error.localizedDescription)")
-                await MainActor.run { self.statusBar.setState(.idleListening) }
+                await MainActor.run {
+                    self.speak("Sorry, I ran into an error reaching Claude. Check the log for details.")
+                }
             }
         }
     }

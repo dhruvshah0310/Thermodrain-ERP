@@ -45,12 +45,16 @@ final class SpeechEngine {
     private var isRotating = false
     private var consecutiveErrorCount = 0
     private var forceServerBasedRecognition = false
+    private var isMuted = false
+    private var awaitingFollowUp = false
 
     let wakeWord: String
     // Silence (after the command has started) before the command is considered complete.
     let silenceTimeout: TimeInterval
     // How long to wait after the wake word for the user to begin their command.
     let commandStartTimeout: TimeInterval
+    // How long to keep listening for a follow-up (no wake word needed) after a reply.
+    let followUpWindow: TimeInterval
     // Stay comfortably under Apple's ~1 minute per-task ceiling.
     let maxSessionDuration: TimeInterval = 40
     // Only give up on on-device recognition after several consecutive failures — a single
@@ -64,12 +68,34 @@ final class SpeechEngine {
         wakeWord: String,
         silenceTimeout: TimeInterval = 2.0,
         commandStartTimeout: TimeInterval = 6.0,
+        followUpWindow: TimeInterval = 8.0,
         locale: Locale = Locale(identifier: "en-US")
     ) {
         self.wakeWord = wakeWord.lowercased()
         self.silenceTimeout = silenceTimeout
         self.commandStartTimeout = commandStartTimeout
+        self.followUpWindow = followUpWindow
         self.recognizer = SFSpeechRecognizer(locale: locale)
+    }
+
+    /// Stop/allow feeding audio into recognition without tearing anything down — used to keep
+    /// Jarvis from transcribing its own text-to-speech while it's talking.
+    func setMuted(_ muted: Bool) {
+        DispatchQueue.main.async { self.isMuted = muted }
+    }
+
+    /// Enter "listening for a follow-up" without requiring the wake word, for `followUpWindow`
+    /// seconds. Everything already transcribed is marked consumed so only new speech counts.
+    func armFollowUp() {
+        DispatchQueue.main.async {
+            self.consumedCount = self.rawTranscript.count
+            self.lastTranscript = ""
+            self.lastChangeTime = Date()
+            self.triggerTime = Date()
+            self.awaitingFollowUp = true
+            self.state = .triggered
+            self.onStateChange?(.triggered)
+        }
     }
 
     func start() throws {
@@ -105,7 +131,8 @@ final class SpeechEngine {
         let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             // Runs on an audio thread; only touch the thread-safe request append.
-            self?.request?.append(buffer)
+            guard let self, !self.isMuted else { return }
+            self.request?.append(buffer)
         }
         tapInstalled = true
         audioEngine.prepare()
@@ -249,9 +276,10 @@ final class SpeechEngine {
         if state == .triggered {
             let command = commandPortion(of: lastTranscript)
             if command.isEmpty {
-                // Heard the wake word but no command yet — wait patiently, then give up quietly so
-                // the user isn't rushed into speaking the instant they say "Jarvis".
-                if now.timeIntervalSince(triggerTime) > commandStartTimeout {
+                // Heard the wake word (or armed a follow-up) but no command yet — wait patiently,
+                // then give up quietly so the user isn't rushed. A follow-up gets a longer window.
+                let startWindow = awaitingFollowUp ? followUpWindow : commandStartTimeout
+                if now.timeIntervalSince(triggerTime) > startWindow {
                     resetToIdle()
                 }
             } else if now.timeIntervalSince(lastChangeTime) > silenceTimeout {
@@ -269,6 +297,7 @@ final class SpeechEngine {
         consumedCount = rawTranscript.count
         lastTranscript = ""
         lastChangeTime = Date()
+        awaitingFollowUp = false
         state = .idle
         onStateChange?(.idle)
     }

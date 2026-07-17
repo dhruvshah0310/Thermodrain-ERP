@@ -78,18 +78,57 @@ permanent location to point at:
 | `workspaceDirectory` | Folder Claude's file tools are confined to. |
 | `maxToolIterations` | Cap on tool-call round-trips per spoken command, so a confused loop can't run forever. |
 | `launchAtLogin` | Mirrors the menu bar toggle; installs/removes a LaunchAgent. |
+| `silenceTimeout` | Seconds of silence (once you've started speaking) before a command is finalized. Raise it if you get cut off between words. |
+| `commandStartTimeout` | Seconds to wait, after the wake word, for you to begin speaking before giving up. |
+| `conversationMode` | On by default. After a reply, keeps listening for a follow-up so you don't have to say the wake word every turn. |
+| `followUpWindow` | Seconds to listen for a follow-up after a reply before returning to wake-word mode. |
+| `greetOnLaunch` | On by default. Speaks a time-appropriate greeting when the app starts. |
+| `userName` | Optional name for a personalized greeting (e.g. "Good morning, Dhruv."). `null` for none. |
 
-Restart the app after hand-editing the config file.
+Restart the app after hand-editing the config file. `conversationMode`, `greetOnLaunch`, and the
+allow-flags also have menu bar toggles.
+
+## Conversation mode
+
+With `conversationMode` on (default), after Jarvis finishes speaking it keeps listening for
+`followUpWindow` seconds (default 8) — during which you can give another command **without**
+saying "Jarvis" again, so a back-and-forth flows naturally. The mic is muted while Jarvis is
+actually speaking, so it never transcribes its own voice. If you don't say anything within the
+window, it quietly returns to waiting for the wake word. Toggle it from the menu bar or config.
+
+## Greeting at launch
+
+With `greetOnLaunch` on (default), Jarvis speaks "Good morning/afternoon/evening[, name]. Jarvis
+is online and ready." when it starts. Combined with Launch at Login (below), that means it greets
+you automatically each time you log in. Set `userName` in the config for a personalized greeting.
+
+## Running without Terminal (the double-clickable app)
+
+Running `.build/release/JarvisAssistant` from Terminal ties the app to that Terminal window —
+closing the window quits Jarvis. To run it as a normal background app instead:
+
+```bash
+./Scripts/package_app.sh
+```
+
+This builds and assembles **`~/Applications/JarvisAssistant.app`** — a menu-bar-only app (no Dock
+icon) you can double-click. Because it's ad-hoc signed rather than notarized by Apple, the very
+first time you must **right-click it in Finder → Open** to get past Gatekeeper (after that,
+double-click works). It keeps running after you close Terminal, and quits from its own menu.
+
+Setting the API key in the app: open its menu bar icon → **Change Anthropic API Key…** and paste
+your key there (that stores it in the Keychain under the app's identity). Alternatively drop the
+key into `~/JarvisAssistant/api-key.txt` and the app will pick it up.
 
 ## Launch at login / background
 
-Toggle **Launch at Login** from the menu bar icon. This installs a `launchd` LaunchAgent
-(`~/Library/LaunchAgents/com.jarvis.assistant.plist`) pointed at the currently running binary's
-path, so build/run it from its final install location first (see `Scripts/install.sh`).
+Once you're running the packaged app, toggle **Launch at Login** from the menu bar icon. This
+installs a `launchd` LaunchAgent (`~/Library/LaunchAgents/com.jarvis.assistant.plist`) pointed at
+the app, so Jarvis starts automatically and greets you at every login.
 
-**Important:** `launchd` starts it headlessly at login, before you're at a Terminal — it can't
-show the Microphone/Speech Recognition permission prompts at that point. Grant both permissions
-manually first (step 2 above) before enabling Launch at Login.
+**Important:** `launchd` starts it headlessly at login — it can't show the Microphone / Speech
+Recognition permission prompts at that point. Launch the app manually once first and grant both
+permissions before enabling Launch at Login.
 
 ## Safety notes
 

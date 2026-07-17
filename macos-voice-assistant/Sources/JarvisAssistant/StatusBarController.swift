@@ -61,6 +61,16 @@ final class StatusBarController {
         apiKeyItem.target = self
         menu.addItem(apiKeyItem)
 
+        let conversationItem = NSMenuItem(title: "Conversation Mode (reply then keep listening)", action: #selector(toggleConversation), keyEquivalent: "")
+        conversationItem.target = self
+        conversationItem.state = assistant.config.conversationMode ? .on : .off
+        menu.addItem(conversationItem)
+
+        let greetItem = NSMenuItem(title: "Greet Me at Launch", action: #selector(toggleGreet), keyEquivalent: "")
+        greetItem.target = self
+        greetItem.state = assistant.config.greetOnLaunch ? .on : .off
+        menu.addItem(greetItem)
+
         let shellItem = NSMenuItem(title: "Allow Shell Commands", action: #selector(toggleShell), keyEquivalent: "")
         shellItem.target = self
         shellItem.state = assistant.config.allowShellCommands ? .on : .off
@@ -155,6 +165,18 @@ final class StatusBarController {
         confirmation.messageText = "Saved"
         confirmation.informativeText = "Key stored (\(key.count) characters). Say \"Jarvis, how are you?\" to test it."
         confirmation.runModal()
+    }
+
+    @objc private func toggleConversation() {
+        assistant.config.conversationMode.toggle()
+        assistant.config.save()
+        buildMenu()
+    }
+
+    @objc private func toggleGreet() {
+        assistant.config.greetOnLaunch.toggle()
+        assistant.config.save()
+        buildMenu()
     }
 
     @objc private func toggleShell() {
