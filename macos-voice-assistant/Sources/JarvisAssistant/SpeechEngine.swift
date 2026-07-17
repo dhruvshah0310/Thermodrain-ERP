@@ -1,14 +1,14 @@
 import AVFoundation
 import Speech
 
-/// Runs one continuously-recreated on-device speech recognition session. While the running
-/// transcript doesn't contain the wake word, everything is discarded (idle scanning). Once the
-/// wake word appears, the same session keeps accumulating audio as the spoken command; a short
-/// silence (no transcript change for `silenceTimeout`) finalizes it, hands the trailing text
-/// (after the wake word) to `onCommand`, and starts a fresh session to resume wake-word scanning.
-///
-/// Recognition sessions are recreated periodically regardless, since SFSpeechRecognizer sessions
-/// are not meant to run unbounded.
+/// Runs one long-lived speech recognition session rather than recreating it after every command:
+/// tearing down and rebuilding SFSpeechRecognitionTask in rapid succession has been observed to
+/// destabilize the on-device recognizer on some Macs (repeated kAFAssistantErrorDomain failures
+/// even with the language model installed). Instead, a finished command just advances a
+/// `consumedCount` marker past the text already handled in the ever-growing transcript, and
+/// wake-word scanning/command extraction always operate on the unconsumed suffix. The underlying
+/// task is only torn down and rebuilt on a genuine error or the periodic `maxSessionDuration`
+/// refresh (SFSpeechRecognizer sessions aren't meant to run totally unbounded).
 final class SpeechEngine {
     enum State {
         case idle
@@ -21,6 +21,8 @@ final class SpeechEngine {
     private var task: SFSpeechRecognitionTask?
 
     private var state: State = .idle
+    private var rawTranscript = ""
+    private var consumedCount = 0
     private var lastTranscript = ""
     private var lastChangeTime = Date()
     private var sessionStartTime = Date()
@@ -80,6 +82,8 @@ final class SpeechEngine {
             req.requiresOnDeviceRecognition = true
         }
         request = req
+        rawTranscript = ""
+        consumedCount = 0
         lastTranscript = ""
         lastChangeTime = Date()
         sessionStartTime = Date()
@@ -99,11 +103,21 @@ final class SpeechEngine {
     private func handle(transcript: String) {
         // A real result means recognition is working; forgive past failures.
         consecutiveErrorCount = 0
-        if transcript != lastTranscript {
-            lastTranscript = transcript
+        guard transcript != rawTranscript else { return }
+        rawTranscript = transcript
+
+        let active: String
+        if consumedCount > 0, consumedCount <= transcript.count {
+            active = String(transcript.dropFirst(consumedCount)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            active = transcript
+        }
+
+        if active != lastTranscript {
+            lastTranscript = active
             lastChangeTime = Date()
         }
-        if state == .idle, transcript.lowercased().contains(wakeWord) {
+        if state == .idle, active.lowercased().contains(wakeWord) {
             state = .triggered
             onStateChange?(.triggered)
         }
@@ -148,13 +162,21 @@ final class SpeechEngine {
     }
 
     private func finalizeCommand() {
-        let full = lastTranscript
-        var command = full
-        if let range = full.lowercased().range(of: wakeWord) {
-            command = String(full[range.upperBound...])
+        let active = lastTranscript
+        var command = active
+        if let range = active.lowercased().range(of: wakeWord) {
+            command = String(active[range.upperBound...])
         }
         command = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        restartSession()
+
+        // Mark everything heard so far as consumed and go back to idle scanning, without tearing
+        // down the underlying recognition task (see the type-level doc comment for why).
+        consumedCount = rawTranscript.count
+        lastTranscript = ""
+        lastChangeTime = Date()
+        state = .idle
+        onStateChange?(.idle)
+
         if !command.isEmpty {
             onCommand?(command)
         }
