@@ -12,6 +12,12 @@ struct Config: Codable {
     var workspaceDirectory: String
     var maxToolIterations: Int
     var launchAtLogin: Bool
+    // Seconds of silence (after you've started speaking a command) before Jarvis considers the
+    // command finished. Raise this if it cuts you off between words.
+    var silenceTimeout: Double
+    // Seconds Jarvis waits, after hearing the wake word, for you to actually start your command
+    // before giving up and going back to idle. Raise this if you need more time to think.
+    var commandStartTimeout: Double
 
     static let `default` = Config(
         // Claude Code's internal short model names (e.g. "claude-sonnet-5") don't always match the
@@ -28,8 +34,51 @@ struct Config: Codable {
         allowFileAccess: true,
         workspaceDirectory: "~/JarvisAssistant/workspace",
         maxToolIterations: 6,
-        launchAtLogin: false
+        launchAtLogin: false,
+        silenceTimeout: 2.0,
+        commandStartTimeout: 6.0
     )
+
+    // Resilient decoding: any key missing from an older config.json falls back to the default,
+    // so adding new settings never fails to load or silently wipes the user's existing file.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Config.default
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
+        wakeWord = try c.decodeIfPresent(String.self, forKey: .wakeWord) ?? d.wakeWord
+        voiceIdentifier = try c.decodeIfPresent(String.self, forKey: .voiceIdentifier) ?? d.voiceIdentifier
+        speechRate = try c.decodeIfPresent(Float.self, forKey: .speechRate) ?? d.speechRate
+        allowShellCommands = try c.decodeIfPresent(Bool.self, forKey: .allowShellCommands) ?? d.allowShellCommands
+        allowAppleScript = try c.decodeIfPresent(Bool.self, forKey: .allowAppleScript) ?? d.allowAppleScript
+        allowOpenApps = try c.decodeIfPresent(Bool.self, forKey: .allowOpenApps) ?? d.allowOpenApps
+        allowFileAccess = try c.decodeIfPresent(Bool.self, forKey: .allowFileAccess) ?? d.allowFileAccess
+        workspaceDirectory = try c.decodeIfPresent(String.self, forKey: .workspaceDirectory) ?? d.workspaceDirectory
+        maxToolIterations = try c.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? d.maxToolIterations
+        launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
+        silenceTimeout = try c.decodeIfPresent(Double.self, forKey: .silenceTimeout) ?? d.silenceTimeout
+        commandStartTimeout = try c.decodeIfPresent(Double.self, forKey: .commandStartTimeout) ?? d.commandStartTimeout
+    }
+
+    private init(
+        model: String, wakeWord: String, voiceIdentifier: String?, speechRate: Float,
+        allowShellCommands: Bool, allowAppleScript: Bool, allowOpenApps: Bool, allowFileAccess: Bool,
+        workspaceDirectory: String, maxToolIterations: Int, launchAtLogin: Bool,
+        silenceTimeout: Double, commandStartTimeout: Double
+    ) {
+        self.model = model
+        self.wakeWord = wakeWord
+        self.voiceIdentifier = voiceIdentifier
+        self.speechRate = speechRate
+        self.allowShellCommands = allowShellCommands
+        self.allowAppleScript = allowAppleScript
+        self.allowOpenApps = allowOpenApps
+        self.allowFileAccess = allowFileAccess
+        self.workspaceDirectory = workspaceDirectory
+        self.maxToolIterations = maxToolIterations
+        self.launchAtLogin = launchAtLogin
+        self.silenceTimeout = silenceTimeout
+        self.commandStartTimeout = commandStartTimeout
+    }
 
     var workspaceURL: URL {
         URL(fileURLWithPath: (workspaceDirectory as NSString).expandingTildeInPath)

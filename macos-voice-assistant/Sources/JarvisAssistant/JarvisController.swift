@@ -23,7 +23,11 @@ final class JarvisController {
 
     init() {
         config = Config.load()
-        speechEngine = SpeechEngine(wakeWord: config.wakeWord)
+        speechEngine = SpeechEngine(
+            wakeWord: config.wakeWord,
+            silenceTimeout: config.silenceTimeout,
+            commandStartTimeout: config.commandStartTimeout
+        )
         executor = ToolExecutor(config: config)
         try? FileManager.default.createDirectory(at: config.workspaceURL, withIntermediateDirectories: true)
         apiKey = Self.resolveAPIKey()

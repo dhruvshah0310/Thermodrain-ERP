@@ -37,6 +37,7 @@ final class SpeechEngine {
     private var consumedCount = 0
     private var lastTranscript = ""
     private var lastChangeTime = Date()
+    private var triggerTime = Date()
     private var sessionStartTime = Date()
     private var tickTimer: Timer?
 
@@ -46,7 +47,10 @@ final class SpeechEngine {
     private var forceServerBasedRecognition = false
 
     let wakeWord: String
-    let silenceTimeout: TimeInterval = 1.2
+    // Silence (after the command has started) before the command is considered complete.
+    let silenceTimeout: TimeInterval
+    // How long to wait after the wake word for the user to begin their command.
+    let commandStartTimeout: TimeInterval
     // Stay comfortably under Apple's ~1 minute per-task ceiling.
     let maxSessionDuration: TimeInterval = 40
     // Only give up on on-device recognition after several consecutive failures — a single
@@ -56,8 +60,15 @@ final class SpeechEngine {
     var onStateChange: ((State) -> Void)?
     var onCommand: ((String) -> Void)?
 
-    init(wakeWord: String, locale: Locale = Locale(identifier: "en-US")) {
+    init(
+        wakeWord: String,
+        silenceTimeout: TimeInterval = 2.0,
+        commandStartTimeout: TimeInterval = 6.0,
+        locale: Locale = Locale(identifier: "en-US")
+    ) {
         self.wakeWord = wakeWord.lowercased()
+        self.silenceTimeout = silenceTimeout
+        self.commandStartTimeout = commandStartTimeout
         self.recognizer = SFSpeechRecognizer(locale: locale)
     }
 
@@ -155,8 +166,17 @@ final class SpeechEngine {
         }
         if state == .idle, active.lowercased().contains(wakeWord) {
             state = .triggered
+            triggerTime = Date()
             onStateChange?(.triggered)
         }
+    }
+
+    /// The spoken command with the wake word (and anything before it) stripped off.
+    private func commandPortion(of text: String) -> String {
+        if let range = text.lowercased().range(of: wakeWord) {
+            return String(text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Called (on main) when a recognition task ends — naturally (isFinal), on end-of-speech, or on
@@ -226,8 +246,18 @@ final class SpeechEngine {
 
     private func tick() {
         let now = Date()
-        if state == .triggered, now.timeIntervalSince(lastChangeTime) > silenceTimeout, !lastTranscript.isEmpty {
-            finalizeCommand()
+        if state == .triggered {
+            let command = commandPortion(of: lastTranscript)
+            if command.isEmpty {
+                // Heard the wake word but no command yet — wait patiently, then give up quietly so
+                // the user isn't rushed into speaking the instant they say "Jarvis".
+                if now.timeIntervalSince(triggerTime) > commandStartTimeout {
+                    resetToIdle()
+                }
+            } else if now.timeIntervalSince(lastChangeTime) > silenceTimeout {
+                // They've spoken a command and then paused long enough — finish it.
+                finalizeCommand(command)
+            }
             return
         }
         if now.timeIntervalSince(sessionStartTime) > maxSessionDuration, !isRotating {
@@ -235,23 +265,19 @@ final class SpeechEngine {
         }
     }
 
-    private func finalizeCommand() {
-        let active = lastTranscript
-        var command = active
-        if let range = active.lowercased().range(of: wakeWord) {
-            command = String(active[range.upperBound...])
-        }
-        command = command.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Mark everything heard so far as consumed and go back to idle scanning. The underlying
-        // task keeps running until it naturally ends (which then rotates), so we don't tear it
-        // down here.
+    private func resetToIdle() {
         consumedCount = rawTranscript.count
         lastTranscript = ""
         lastChangeTime = Date()
         state = .idle
         onStateChange?(.idle)
+    }
 
+    private func finalizeCommand(_ command: String) {
+        // Mark everything heard so far as consumed and go back to idle scanning. The underlying
+        // task keeps running until it naturally ends (which then rotates), so we don't tear it
+        // down here.
+        resetToIdle()
         if !command.isEmpty {
             onCommand?(command)
         }
