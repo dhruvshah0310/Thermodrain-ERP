@@ -12,6 +12,19 @@ final class StatusBarController {
     private let statusItem: NSStatusItem
     private let assistant: JarvisController
 
+    /// Selectable Claude models (friendly name, API model ID). Verify current IDs at
+    /// https://docs.anthropic.com/en/docs/about-claude/models — you can also type any model string
+    /// directly into config.json if a newer one ships before this list is updated.
+    private static let availableModels: [(name: String, id: String)] = [
+        ("Opus 4.8 — most capable", "claude-opus-4-8"),
+        ("Opus 4.7", "claude-opus-4-7"),
+        ("Opus 4.6", "claude-opus-4-6"),
+        ("Sonnet 5 — fast + capable (default)", "claude-sonnet-5"),
+        ("Sonnet 4.6", "claude-sonnet-4-6"),
+        ("Haiku 4.5 — fastest, cheapest", "claude-haiku-4-5"),
+        ("Fable 5 — most powerful (premium)", "claude-fable-5")
+    ]
+
     init(assistant: JarvisController) {
         self.assistant = assistant
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -70,6 +83,31 @@ final class StatusBarController {
         greetItem.target = self
         greetItem.state = assistant.config.greetOnLaunch ? .on : .off
         menu.addItem(greetItem)
+
+        // Model picker submenu.
+        let modelItem = NSMenuItem(title: "Model", action: nil, keyEquivalent: "")
+        let modelSubmenu = NSMenu()
+        var currentIsKnown = false
+        for entry in Self.availableModels {
+            let item = NSMenuItem(title: entry.name, action: #selector(selectModel(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = entry.id
+            if entry.id == assistant.config.model {
+                item.state = .on
+                currentIsKnown = true
+            }
+            modelSubmenu.addItem(item)
+        }
+        // If the config holds a custom/newer model string not in the list, show it too.
+        if !currentIsKnown {
+            modelSubmenu.addItem(.separator())
+            let custom = NSMenuItem(title: "\(assistant.config.model) (from config)", action: nil, keyEquivalent: "")
+            custom.state = .on
+            custom.isEnabled = false
+            modelSubmenu.addItem(custom)
+        }
+        modelItem.submenu = modelSubmenu
+        menu.addItem(modelItem)
 
         let shellItem = NSMenuItem(title: "Allow Shell Commands", action: #selector(toggleShell), keyEquivalent: "")
         shellItem.target = self
@@ -177,6 +215,21 @@ final class StatusBarController {
         assistant.config.greetOnLaunch.toggle()
         assistant.config.save()
         buildMenu()
+    }
+
+    @objc private func selectModel(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        assistant.config.model = id
+        assistant.config.save()
+        buildMenu()
+        Logger.shared.log("Model switched to \(id) (takes effect on the next command).")
+
+        assistant.pauseListening()
+        defer { assistant.resumeListening() }
+        let info = NSAlert()
+        info.messageText = "Model set to \(sender.title)"
+        info.informativeText = "New commands will use this model. If it's a model your account can't access, you'll hear an error — pick another from the Model menu."
+        info.runModal()
     }
 
     @objc private func toggleShell() {

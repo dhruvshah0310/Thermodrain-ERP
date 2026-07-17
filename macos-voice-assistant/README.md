@@ -152,10 +152,14 @@ to let apps catch up. Its instructions include recipes for common tasks:
   (`allowWebSearch`, on by default) instead of guessing. Say *"Jarvis, what's the weather in
   Mumbai right now?"* or *"Jarvis, who won the match last night?"*
 
-**Model note:** the default model is `claude-sonnet-5` (fast, capable, supports web search). For
-the most capable/agentic behavior you can set `"model": "claude-opus-4-8"` in the config — higher
-quality, but more expensive per request. Verify the current model string at
-https://docs.anthropic.com/en/docs/about-claude/models.
+**Switching models:** pick a model from the menu bar icon → **Model** submenu — Opus 4.8/4.7/4.6,
+Sonnet 5 (default), Sonnet 4.6, Haiku 4.5, or Fable 5. A checkmark shows the current one, and the
+change takes effect on your next command (no restart). More capable models (Opus, Fable) give
+better answers but cost more per request; Haiku is fastest and cheapest. You can also set any
+model string directly in `config.json` (`"model": "..."`) if a newer one ships before the menu is
+updated — verify current IDs at https://docs.anthropic.com/en/docs/about-claude/models. If you
+pick a model your account can't access, you'll hear an error on the next command — just switch
+back.
 
 **One-time permission for this:** typing into other apps requires macOS **Accessibility**
 permission. The first time Jarvis tries it, macOS will prompt — or grant it yourself under
