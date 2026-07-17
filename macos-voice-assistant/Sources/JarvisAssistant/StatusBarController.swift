@@ -52,7 +52,12 @@ final class StatusBarController {
         menu.addItem(title)
         menu.addItem(.separator())
 
-        let apiKeyItem = NSMenuItem(title: "Set Anthropic API Key…", action: #selector(setAPIKey), keyEquivalent: "")
+        let hasKey = KeychainStore.loadAPIKey() != nil
+        let apiKeyItem = NSMenuItem(
+            title: hasKey ? "Change Anthropic API Key… (saved)" : "Set Anthropic API Key…",
+            action: #selector(setAPIKey),
+            keyEquivalent: ""
+        )
         apiKeyItem.target = self
         menu.addItem(apiKeyItem)
 
@@ -90,6 +95,11 @@ final class StatusBarController {
     }
 
     @objc private func setAPIKey() {
+        // Showing a blocking modal while the recognition task keeps running has been observed to
+        // leave it in a broken state, so stop listening for the duration of the dialog.
+        assistant.pauseListening()
+        defer { assistant.resumeListening() }
+
         let alert = NSAlert()
         alert.messageText = "Anthropic API Key"
         alert.informativeText = "Paste your key from console.anthropic.com. It's stored in the macOS Keychain, never written to disk in plaintext."
@@ -97,10 +107,20 @@ final class StatusBarController {
         alert.accessoryView = input
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = input
         NSApp.activate(ignoringOtherApps: true)
+        alert.window.makeKey()
+        input.becomeFirstResponder()
+
         if alert.runModal() == .alertFirstButtonReturn, !input.stringValue.isEmpty {
             KeychainStore.saveAPIKey(input.stringValue)
             assistant.reloadAPIKey()
+            buildMenu()
+
+            let confirmation = NSAlert()
+            confirmation.messageText = "Saved"
+            confirmation.informativeText = "API key stored in the Keychain."
+            confirmation.runModal()
         }
     }
 

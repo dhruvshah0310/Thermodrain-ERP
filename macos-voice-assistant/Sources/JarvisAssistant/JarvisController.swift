@@ -37,6 +37,24 @@ final class JarvisController {
         apiKey = KeychainStore.loadAPIKey()
     }
 
+    /// Stop capturing audio while a blocking dialog (e.g. the API key prompt) is on screen.
+    /// Showing an NSAlert modal while the recognition task keeps running has been observed to
+    /// leave the task in a permanently broken state, so callers should pause around any
+    /// `runModal()` call and resume afterward.
+    func pauseListening() {
+        speechEngine.stop()
+        statusBar.setState(.idleListening)
+    }
+
+    func resumeListening() {
+        do {
+            try speechEngine.start()
+        } catch {
+            Logger.shared.log("Failed to resume speech engine: \(error.localizedDescription)")
+            statusBar.setState(.error)
+        }
+    }
+
     func start() {
         requestPermissions { [weak self] granted in
             guard let self else { return }
