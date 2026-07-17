@@ -29,9 +29,17 @@ final class JarvisController {
     "return" to send.
 
     • WhatsApp by contact name (when you only have a name, not a number): open_application \
-    "WhatsApp"; wait ~2s; press_key "f" with modifier "command" to open search; type_text the \
-    contact name; wait ~1s; press_key "return" to open the top matching chat; type_text the \
-    message; press_key "return" to send. Be economical — don't add extra navigation steps.
+    "WhatsApp"; wait ~2s; press_key "f" with modifier "command"; type_text the contact name; \
+    wait ~1.5s; press_key "return" to open the top matching chat; wait ~1s; type_text the \
+    message; wait ~0.5s; press_key "return" to send. IMPORTANT: pass app:"WhatsApp" on every \
+    type_text and press_key here so the input is directed into WhatsApp, not whatever else might \
+    be focused.
+
+    UI automation like this is best-effort — you are sending keystrokes and cannot actually see \
+    whether they landed correctly. So NEVER claim a message was definitely delivered. After \
+    attempting it, say something like "I've tried to send that on WhatsApp — can you check it \
+    went through?" rather than stating it was sent. Only state success for things whose tool \
+    result truly confirms it (e.g. an app opened).
 
     • Email with Apple Mail: use run_applescript with Mail's scripting, e.g. make a new outgoing \
     message with the subject/content/recipient, then send it. Confirm the recipient if unsure.

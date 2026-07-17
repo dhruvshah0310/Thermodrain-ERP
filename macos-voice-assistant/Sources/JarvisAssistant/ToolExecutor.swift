@@ -44,13 +44,13 @@ actor ToolExecutor {
             guard config.allowAppleScript, let text = input["text"] as? String else {
                 return "error: applescript disabled or missing text"
             }
-            return typeText(text)
+            return typeText(text, app: input["app"] as? String)
         case "press_key":
             guard config.allowAppleScript, let key = input["key"] as? String else {
                 return "error: applescript disabled or missing key"
             }
             let modifiers = input["modifiers"] as? [String] ?? []
-            return pressKey(key, modifiers: modifiers)
+            return pressKey(key, modifiers: modifiers, app: input["app"] as? String)
         case "wait":
             let seconds = min(max((input["seconds"] as? Double) ?? 1.0, 0), 5.0)
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
@@ -84,10 +84,14 @@ actor ToolExecutor {
         do {
             try task.run()
             task.waitUntilExit()
-            return task.terminationStatus == 0 ? "opened \(name)" : "failed to open \(name)"
+            guard task.terminationStatus == 0 else { return "failed to open \(name)" }
         } catch {
             return "error: \(error.localizedDescription)"
         }
+        // `open -a` launches the app but may not bring it fully to the front; an explicit activate
+        // makes it the frontmost app so subsequent keystrokes land in it.
+        _ = runAppleScript("tell application \(appleScriptLiteral(name)) to activate")
+        return "opened and activated \(name)"
     }
 
     private func runAppleScript(_ script: String) -> String {
@@ -110,16 +114,35 @@ actor ToolExecutor {
         return "\"\(escaped)\""
     }
 
-    private func typeText(_ text: String) -> String {
-        let script = "tell application \"System Events\" to keystroke \(appleScriptLiteral(text))"
-        let result = runAppleScript(script)
-        if result.hasPrefix("applescript error") {
-            return result + " (this usually means Jarvis needs Accessibility permission: System Settings > Privacy & Security > Accessibility)"
+    /// Wraps a System Events action so it's directed at a specific app (activated first, keystrokes
+    /// sent to that process) when `app` is given, or the frontmost app otherwise. Targeting the
+    /// process is much more reliable than hoping the right window happens to be focused.
+    private func systemEventsScript(action: String, app: String?) -> String {
+        if let app, !app.isEmpty {
+            let a = appleScriptLiteral(app)
+            return """
+            tell application \(a) to activate
+            delay 0.4
+            tell application "System Events" to tell process \(a) to \(action)
+            """
         }
-        return "typed \(text.count) characters"
+        return "tell application \"System Events\" to \(action)"
     }
 
-    private func pressKey(_ key: String, modifiers: [String]) -> String {
+    private func accessibilityHint(_ result: String) -> String {
+        result + " (if this didn't work, Jarvis likely needs Accessibility permission: System Settings > Privacy & Security > Accessibility — add and enable JarvisAssistant)"
+    }
+
+    private func typeText(_ text: String, app: String?) -> String {
+        let result = runAppleScript(systemEventsScript(action: "keystroke \(appleScriptLiteral(text))", app: app))
+        if result.hasPrefix("applescript error") {
+            return accessibilityHint(result)
+        }
+        // We can only confirm the keystrokes were dispatched, not that they landed correctly.
+        return "dispatched typing of \(text.count) characters (not verified visually)"
+    }
+
+    private func pressKey(_ key: String, modifiers: [String], app: String?) -> String {
         let specialKeyCodes: [String: Int] = [
             "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51,
             "escape": 53, "left": 123, "right": 124, "down": 125, "up": 126
@@ -138,11 +161,11 @@ actor ToolExecutor {
         } else {
             action = "keystroke \(appleScriptLiteral(key))\(modifierClause)"
         }
-        let result = runAppleScript("tell application \"System Events\" to \(action)")
+        let result = runAppleScript(systemEventsScript(action: action, app: app))
         if result.hasPrefix("applescript error") {
-            return result + " (this usually means Jarvis needs Accessibility permission: System Settings > Privacy & Security > Accessibility)"
+            return accessibilityHint(result)
         }
-        return "pressed \(key)"
+        return "dispatched key \(key) (not verified visually)"
     }
 
     private func workspaceURL(for relativePath: String) -> URL? {

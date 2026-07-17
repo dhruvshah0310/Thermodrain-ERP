@@ -61,7 +61,10 @@ enum JarvisTools {
                 """,
                 inputSchema: [
                     "type": "object",
-                    "properties": ["text": ["type": "string", "description": "The text to type"]],
+                    "properties": [
+                        "text": ["type": "string", "description": "The text to type"],
+                        "app": ["type": "string", "description": "App name to direct the typing to (e.g. \"WhatsApp\"); it is activated first. Strongly recommended so keystrokes land in the right app. Omit to type into whatever is frontmost."]
+                    ],
                     "required": ["text"]
                 ]
             ))
@@ -80,7 +83,8 @@ enum JarvisTools {
                             "type": "array",
                             "items": ["type": "string", "enum": ["command", "option", "control", "shift"]],
                             "description": "Optional modifier keys held while pressing"
-                        ]
+                        ],
+                        "app": ["type": "string", "description": "App name to direct the keypress to (e.g. \"WhatsApp\"); it is activated first. Recommended so the key lands in the right app. Omit for the frontmost app."]
                     ],
                     "required": ["key"]
                 ]
