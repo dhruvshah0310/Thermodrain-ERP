@@ -45,7 +45,7 @@ struct Config: Codable {
         allowOpenApps: true,
         allowFileAccess: true,
         workspaceDirectory: "~/JarvisAssistant/workspace",
-        maxToolIterations: 10,
+        maxToolIterations: 16,
         launchAtLogin: false,
         silenceTimeout: 2.5,
         commandStartTimeout: 6.0,

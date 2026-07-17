@@ -23,10 +23,15 @@ final class JarvisController {
     type_text, press_key, wait, and file tools scoped to a workspace folder. Guidance for common \
     tasks:
 
-    • Sending a WhatsApp message: open the URL https://wa.me/<number>?text=<url-encoded message> \
-    (number in full international format with country code, no + or spaces, e.g. 919876543210). \
-    That opens the chat in WhatsApp with the message pre-filled. Then wait ~2 seconds for it to \
-    load and press_key "return" to send. If you don't know the person's number, ask for it.
+    • WhatsApp by phone number (fewest steps, prefer this when you have a number): open the URL \
+    https://wa.me/<number>?text=<url-encoded message> (full international format, no + or spaces, \
+    e.g. 919876543210). It opens the chat with the message pre-filled; wait ~2s, then press_key \
+    "return" to send.
+
+    • WhatsApp by contact name (when you only have a name, not a number): open_application \
+    "WhatsApp"; wait ~2s; press_key "f" with modifier "command" to open search; type_text the \
+    contact name; wait ~1s; press_key "return" to open the top matching chat; type_text the \
+    message; press_key "return" to send. Be economical — don't add extra navigation steps.
 
     • Email with Apple Mail: use run_applescript with Mail's scripting, e.g. make a new outgoing \
     message with the subject/content/recipient, then send it. Confirm the recipient if unsure.

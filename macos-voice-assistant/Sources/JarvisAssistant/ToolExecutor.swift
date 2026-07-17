@@ -18,6 +18,13 @@ actor ToolExecutor {
 
     func execute(name: String, input: [String: Any]) async -> String {
         Logger.shared.log("Tool call: \(name) \(input)")
+        let result = await perform(name: name, input: input)
+        let shown = result.count > 300 ? String(result.prefix(300)) + "…" : result
+        Logger.shared.log("Tool result: \(shown)")
+        return result
+    }
+
+    private func perform(name: String, input: [String: Any]) async -> String {
         switch name {
         case "open_application":
             guard let app = input["name"] as? String else { return "error: missing name" }
