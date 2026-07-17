@@ -109,6 +109,11 @@ final class StatusBarController {
         modelItem.submenu = modelSubmenu
         menu.addItem(modelItem)
 
+        let screenItem = NSMenuItem(title: "Allow Screen Control (see & click)", action: #selector(toggleScreenControl), keyEquivalent: "")
+        screenItem.target = self
+        screenItem.state = assistant.config.allowScreenControl ? .on : .off
+        menu.addItem(screenItem)
+
         let shellItem = NSMenuItem(title: "Allow Shell Commands", action: #selector(toggleShell), keyEquivalent: "")
         shellItem.target = self
         shellItem.state = assistant.config.allowShellCommands ? .on : .off
@@ -230,6 +235,12 @@ final class StatusBarController {
         info.messageText = "Model set to \(sender.title)"
         info.informativeText = "New commands will use this model. If it's a model your account can't access, you'll hear an error — pick another from the Model menu."
         info.runModal()
+    }
+
+    @objc private func toggleScreenControl() {
+        assistant.config.allowScreenControl.toggle()
+        assistant.config.save()
+        buildMenu()
     }
 
     @objc private func toggleShell() {

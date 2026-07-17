@@ -59,7 +59,21 @@ struct ClaudeClient {
                 guard let id = use["id"] as? String, let name = use["name"] as? String else { continue }
                 let input = use["input"] as? [String: Any] ?? [:]
                 let output = await executor.execute(name: name, input: input)
-                resultBlocks.append(["type": "tool_result", "tool_use_id": id, "content": output])
+
+                if let imageBase64 = output.imageBase64 {
+                    // Image-bearing result (e.g. a screenshot): send text + image content blocks.
+                    let content: [[String: Any]] = [
+                        ["type": "text", "text": output.text],
+                        ["type": "image", "source": [
+                            "type": "base64",
+                            "media_type": output.imageMediaType ?? "image/png",
+                            "data": imageBase64
+                        ]]
+                    ]
+                    resultBlocks.append(["type": "tool_result", "tool_use_id": id, "content": content])
+                } else {
+                    resultBlocks.append(["type": "tool_result", "tool_use_id": id, "content": output.text])
+                }
             }
             messages.append(["role": "user", "content": resultBlocks])
         }

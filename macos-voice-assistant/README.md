@@ -86,6 +86,7 @@ permanent location to point at:
 | `userName` | Optional name for a personalized greeting (e.g. "Good morning, Dhruv."). `null` for none. |
 | `speechLocale` | Speech-recognition locale. `"en-IN"` (default) understands Indian-accented English best; `"en-US"`, `"en-GB"`, etc. also work. Falls back automatically if unsupported. |
 | `allowWebSearch` | On by default. Lets Claude search the web (Anthropic's hosted web-search tool) before answering. Needs a recent model — the default `claude-sonnet-5` supports it. |
+| `allowScreenControl` | On by default. Lets Jarvis take screenshots (see the screen) and control the mouse (click/scroll) — true "computer use." Needs Screen Recording + Accessibility permissions. |
 
 Restart the app after hand-editing the config file. `conversationMode`, `greetOnLaunch`, and the
 allow-flags also have menu bar toggles.
@@ -160,6 +161,20 @@ model string directly in `config.json` (`"model": "..."`) if a newer one ships b
 updated — verify current IDs at https://docs.anthropic.com/en/docs/about-claude/models. If you
 pick a model your account can't access, you'll hear an error on the next command — just switch
 back.
+
+### Seeing and clicking the screen (computer use)
+
+With `allowScreenControl` on (default), Jarvis can **take a screenshot to see the screen** and
+**click/scroll like a person** — so it can operate apps that have no scripting or keyboard path.
+It screenshots to find a target, clicks it, then screenshots again to confirm. Coordinates are in
+screen points (top-left origin); the screenshot is downscaled to logical point size so clicks land
+accurately on Retina displays.
+
+This needs **two** macOS permissions the first time: **Screen Recording** (to capture the screen)
+and **Accessibility** (to move/click the mouse), both under **System Settings → Privacy &
+Security**. macOS may not prompt automatically for Screen Recording — add JarvisAssistant there
+yourself if screenshots come back as an error. Toggle the whole capability from the menu bar
+(**Allow Screen Control**) or `allowScreenControl` in the config.
 
 **One-time permission for this:** typing into other apps requires macOS **Accessibility**
 permission. The first time Jarvis tries it, macOS will prompt — or grant it yourself under

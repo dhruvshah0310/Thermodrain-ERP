@@ -1,5 +1,20 @@
 import AppKit
+import CoreGraphics
 import Foundation
+
+/// The outcome of a tool call. Most tools return plain `text`; screen-capture tools also attach a
+/// base64 PNG so Claude can actually see the screen.
+struct ToolResult {
+    let text: String
+    let imageBase64: String?
+    let imageMediaType: String?
+
+    init(text: String, imageBase64: String? = nil, imageMediaType: String? = nil) {
+        self.text = text
+        self.imageBase64 = imageBase64
+        self.imageMediaType = imageMediaType
+    }
+}
 
 /// Executes tool calls Claude asks for. Runs as an actor since Process/NSAppleScript work is
 /// blocking and calls arrive from the async Claude conversation loop.
@@ -16,12 +31,20 @@ actor ToolExecutor {
         "curl | sh", "curl | bash", "wget | sh"
     ]
 
-    func execute(name: String, input: [String: Any]) async -> String {
+    func execute(name: String, input: [String: Any]) async -> ToolResult {
         Logger.shared.log("Tool call: \(name) \(input)")
-        let result = await perform(name: name, input: input)
-        let shown = result.count > 300 ? String(result.prefix(300)) + "…" : result
+
+        // Screenshot is the one tool that returns an image rather than text.
+        if name == "screenshot" {
+            let result = captureScreen()
+            Logger.shared.log("Tool result: \(result.text)")
+            return result
+        }
+
+        let text = await perform(name: name, input: input)
+        let shown = text.count > 300 ? String(text.prefix(300)) + "…" : text
         Logger.shared.log("Tool result: \(shown)")
-        return result
+        return ToolResult(text: text)
     }
 
     private func perform(name: String, input: [String: Any]) async -> String {
@@ -56,6 +79,17 @@ actor ToolExecutor {
                 return "error: applescript disabled or missing text"
             }
             return pasteText(text, app: input["app"] as? String)
+        case "click", "double_click", "right_click", "move_mouse":
+            guard config.allowScreenControl else { return "error: screen control disabled" }
+            guard let x = numeric(input["x"]), let y = numeric(input["y"]) else {
+                return "error: missing x/y coordinates"
+            }
+            return performMouse(name, x: x, y: y)
+        case "scroll":
+            guard config.allowScreenControl else { return "error: screen control disabled" }
+            let dx = numeric(input["dx"]) ?? 0
+            let dy = numeric(input["dy"]) ?? 0
+            return performScroll(dx: dx, dy: dy)
         case "wait":
             let seconds = min(max((input["seconds"] as? Double) ?? 1.0, 0), 5.0)
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
@@ -80,6 +114,119 @@ actor ToolExecutor {
         default:
             return "error: unknown tool \(name)"
         }
+    }
+
+    private func numeric(_ value: Any?) -> Double? {
+        if let d = value as? Double { return d }
+        if let i = value as? Int { return Double(i) }
+        if let s = value as? String { return Double(s) }
+        return nil
+    }
+
+    // MARK: - Screen capture
+
+    /// Capture the main display and return it as a base64 PNG, downscaled to the display's logical
+    /// point size so that pixel coordinates Claude reads from the image map 1:1 to the point
+    /// coordinates the mouse tools use (this avoids the Retina 2x mismatch).
+    private func captureScreen() -> ToolResult {
+        guard config.allowScreenControl else {
+            return ToolResult(text: "error: screen control disabled")
+        }
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-screen-\(UUID().uuidString).png")
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        task.arguments = ["-x", "-t", "png", tmp.path] // -x = silent
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            return ToolResult(text: "error: screencapture failed (\(error.localizedDescription)). Jarvis may need Screen Recording permission in System Settings > Privacy & Security.")
+        }
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        guard let image = NSImage(contentsOf: tmp) else {
+            return ToolResult(text: "error: could not read the screenshot. Grant Screen Recording permission in System Settings > Privacy & Security, then retry.")
+        }
+
+        let logicalSize = NSScreen.main?.frame.size ?? image.size
+        guard let png = pngData(from: image, targetSize: logicalSize) else {
+            return ToolResult(text: "error: could not encode the screenshot")
+        }
+        let width = Int(logicalSize.width)
+        let height = Int(logicalSize.height)
+        return ToolResult(
+            text: "Screenshot captured. The screen is \(width) points wide and \(height) points tall; coordinates for click/move tools use this same top-left-origin point space.",
+            imageBase64: png.base64EncodedString(),
+            imageMediaType: "image/png"
+        )
+    }
+
+    private func pngData(from image: NSImage, targetSize: NSSize) -> Data? {
+        let target = NSSize(width: max(1, targetSize.width), height: max(1, targetSize.height))
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(target.width), pixelsHigh: Int(target.height),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        rep.size = target
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(origin: .zero, size: target),
+                   from: NSRect(origin: .zero, size: image.size),
+                   operation: .copy, fraction: 1.0)
+        NSGraphicsContext.restoreGraphicsState()
+
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    // MARK: - Mouse control (CoreGraphics, top-left-origin point coordinates)
+
+    private func performMouse(_ action: String, x: Double, y: Double) -> String {
+        let point = CGPoint(x: x, y: y)
+        switch action {
+        case "move_mouse":
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?
+                .post(tap: .cghidEventTap)
+            return "moved mouse to (\(Int(x)), \(Int(y)))"
+        case "click":
+            postClick(at: point, button: .left, clickCount: 1)
+            return "clicked at (\(Int(x)), \(Int(y)))"
+        case "double_click":
+            postClick(at: point, button: .left, clickCount: 2)
+            return "double-clicked at (\(Int(x)), \(Int(y)))"
+        case "right_click":
+            postClick(at: point, button: .right, clickCount: 1)
+            return "right-clicked at (\(Int(x)), \(Int(y)))"
+        default:
+            return "error: unknown mouse action \(action)"
+        }
+    }
+
+    private func postClick(at point: CGPoint, button: CGMouseButton, clickCount: Int) {
+        let downType: CGEventType = (button == .left) ? .leftMouseDown : .rightMouseDown
+        let upType: CGEventType = (button == .left) ? .leftMouseUp : .rightMouseUp
+        // Move first so the target app registers the cursor position.
+        CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button)?
+            .post(tap: .cghidEventTap)
+        let down = CGEvent(mouseEventSource: nil, mouseType: downType, mouseCursorPosition: point, mouseButton: button)
+        let up = CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: point, mouseButton: button)
+        down?.setIntegerValueField(.mouseEventClickState, value: Int64(clickCount))
+        up?.setIntegerValueField(.mouseEventClickState, value: Int64(clickCount))
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
+    }
+
+    private func performScroll(dx: Double, dy: Double) -> String {
+        // CGEvent scroll: positive dy scrolls up, negative down (line units).
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil, units: .line, wheelCount: 2,
+            wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0
+        ) else { return "error: could not create scroll event" }
+        event.post(tap: .cghidEventTap)
+        return "scrolled (dx \(Int(dx)), dy \(Int(dy)))"
     }
 
     private func openApplication(_ name: String) -> String {

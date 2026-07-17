@@ -116,6 +116,74 @@ enum JarvisTools {
             ))
         }
 
+        if config.allowScreenControl {
+            tools.append(ToolDefinition(
+                name: "screenshot",
+                description: """
+                Capture the current screen and see it. Use this to find out what's on screen before \
+                clicking or typing, and to verify an action worked afterward. The returned image is \
+                in points with a top-left origin; use those same coordinates for click/move.
+                """,
+                inputSchema: ["type": "object", "properties": [String: Any]()]
+            ))
+            tools.append(ToolDefinition(
+                name: "click",
+                description: "Click the mouse at screen coordinates (points, top-left origin). Take a screenshot first to find the coordinates.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "x": ["type": "number", "description": "X coordinate in points"],
+                        "y": ["type": "number", "description": "Y coordinate in points"]
+                    ],
+                    "required": ["x", "y"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "double_click",
+                description: "Double-click at screen coordinates (points, top-left origin).",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "x": ["type": "number"], "y": ["type": "number"]
+                    ],
+                    "required": ["x", "y"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "right_click",
+                description: "Right-click (secondary click) at screen coordinates (points, top-left origin).",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "x": ["type": "number"], "y": ["type": "number"]
+                    ],
+                    "required": ["x", "y"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "move_mouse",
+                description: "Move the mouse cursor to screen coordinates without clicking (points, top-left origin).",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "x": ["type": "number"], "y": ["type": "number"]
+                    ],
+                    "required": ["x", "y"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "scroll",
+                description: "Scroll the mouse wheel. dy positive scrolls up, negative scrolls down; dx scrolls horizontally. Units are lines (a few lines at a time).",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "dx": ["type": "number", "description": "Horizontal scroll (lines)"],
+                        "dy": ["type": "number", "description": "Vertical scroll (lines); negative = down"]
+                    ]
+                ]
+            ))
+        }
+
         if config.allowFileAccess {
             tools.append(ToolDefinition(
                 name: "read_file",

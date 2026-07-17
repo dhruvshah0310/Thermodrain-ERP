@@ -44,6 +44,8 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
         <string>Jarvis listens for the wake word and your spoken commands.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
         <string>Jarvis transcribes your spoken commands so it can act on them.</string>
+    <key>NSAppleEventsUsageDescription</key>
+        <string>Jarvis controls apps (AppleScript / System Events) to carry out your commands.</string>
 </dict>
 </plist>
 PLIST
