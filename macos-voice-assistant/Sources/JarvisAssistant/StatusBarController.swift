@@ -98,30 +98,63 @@ final class StatusBarController {
         // Showing a blocking modal while the recognition task keeps running has been observed to
         // leave it in a broken state, so stop listening for the duration of the dialog.
         assistant.pauseListening()
-        defer { assistant.resumeListening() }
+        // A menu-bar-only (accessory) app doesn't reliably receive keyboard events — including
+        // Cmd+V — in a modal dialog. Temporarily become a regular foreground app so typing and
+        // paste work, then drop back to accessory afterward.
+        NSApp.setActivationPolicy(.regular)
+        defer {
+            NSApp.setActivationPolicy(.accessory)
+            assistant.resumeListening()
+        }
 
         let alert = NSAlert()
         alert.messageText = "Anthropic API Key"
-        alert.informativeText = "Paste your key from console.anthropic.com. It's stored in the macOS Keychain, never written to disk in plaintext."
-        let input = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        alert.informativeText = """
+        Paste or type your key from console.anthropic.com. It must start with "sk-ant-". The field \
+        is shown in full so you can check it's complete and typo-free. It's stored in the macOS \
+        Keychain.
+        """
+
+        // Visible (not secure) field so the user can verify the whole key while debugging
+        // invalid-key errors, pre-filled from the clipboard so no paste is even required.
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        input.placeholderString = "sk-ant-..."
+        if let clip = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !clip.isEmpty {
+            input.stringValue = clip
+        }
         alert.accessoryView = input
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = input
+
         NSApp.activate(ignoringOtherApps: true)
-        alert.window.makeKey()
-        input.becomeFirstResponder()
+        alert.window.makeKeyAndOrderFront(nil)
+        alert.window.initialFirstResponder = input
 
-        if alert.runModal() == .alertFirstButtonReturn, !input.stringValue.isEmpty {
-            KeychainStore.saveAPIKey(input.stringValue)
-            assistant.reloadAPIKey()
-            buildMenu()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-            let confirmation = NSAlert()
-            confirmation.messageText = "Saved"
-            confirmation.informativeText = "API key stored in the Keychain."
-            confirmation.runModal()
+        let key = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+
+        if !key.hasPrefix("sk-ant-") {
+            let warn = NSAlert()
+            warn.messageText = "That doesn't look like an Anthropic API key"
+            warn.informativeText = """
+            Anthropic keys start with "sk-ant-". What you entered starts with \
+            "\(String(key.prefix(7)))…". Double-check you copied the key value itself (not the key's \
+            name or a URL) from console.anthropic.com, then try again. Saving it anyway.
+            """
+            warn.runModal()
         }
+
+        KeychainStore.saveAPIKey(key)
+        assistant.reloadAPIKey()
+        buildMenu()
+
+        let confirmation = NSAlert()
+        confirmation.messageText = "Saved"
+        confirmation.informativeText = "Key stored (\(key.count) characters). Say \"Jarvis, how are you?\" to test it."
+        confirmation.runModal()
     }
 
     @objc private func toggleShell() {
