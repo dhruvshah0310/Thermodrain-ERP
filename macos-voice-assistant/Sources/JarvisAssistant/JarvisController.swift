@@ -23,10 +23,38 @@ final class JarvisController {
 
     init() {
         config = Config.load()
-        apiKey = KeychainStore.loadAPIKey()
         speechEngine = SpeechEngine(wakeWord: config.wakeWord)
         executor = ToolExecutor(config: config)
         try? FileManager.default.createDirectory(at: config.workspaceURL, withIntermediateDirectories: true)
+        apiKey = Self.resolveAPIKey()
+    }
+
+    /// Resolve the API key, in priority order:
+    ///   1. the macOS Keychain (set via the menu dialog),
+    ///   2. the `ANTHROPIC_API_KEY` environment variable (easiest when launching from Terminal —
+    ///      Terminal paste works even when the app's dialog won't accept it),
+    ///   3. a plaintext file at `~/JarvisAssistant/api-key.txt`.
+    /// If found via 2 or 3, it's copied into the Keychain so it persists for future launches.
+    private static func resolveAPIKey() -> String? {
+        if let key = KeychainStore.loadAPIKey(), !key.isEmpty {
+            return key
+        }
+        if let env = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !env.isEmpty {
+            KeychainStore.saveAPIKey(env)
+            Logger.shared.log("Loaded API key from ANTHROPIC_API_KEY and saved it to the Keychain.")
+            return env
+        }
+        let fileURL = URL(fileURLWithPath: ("~/JarvisAssistant/api-key.txt" as NSString).expandingTildeInPath)
+        if let contents = try? String(contentsOf: fileURL, encoding: .utf8) {
+            let key = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty {
+                KeychainStore.saveAPIKey(key)
+                Logger.shared.log("Loaded API key from \(fileURL.path) and saved it to the Keychain.")
+                return key
+            }
+        }
+        return nil
     }
 
     func attach(statusBar: StatusBarController) {
