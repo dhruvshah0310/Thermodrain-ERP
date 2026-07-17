@@ -51,6 +51,11 @@ actor ToolExecutor {
             }
             let modifiers = input["modifiers"] as? [String] ?? []
             return pressKey(key, modifiers: modifiers, app: input["app"] as? String)
+        case "paste_text":
+            guard config.allowAppleScript, let text = input["text"] as? String else {
+                return "error: applescript disabled or missing text"
+            }
+            return pasteText(text, app: input["app"] as? String)
         case "wait":
             let seconds = min(max((input["seconds"] as? Double) ?? 1.0, 0), 5.0)
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
@@ -140,6 +145,18 @@ actor ToolExecutor {
         }
         // We can only confirm the keystrokes were dispatched, not that they landed correctly.
         return "dispatched typing of \(text.count) characters (not verified visually)"
+    }
+
+    private func pasteText(_ text: String, app: String?) -> String {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        // Small delay so the clipboard write settles before pasting.
+        let result = runAppleScript(systemEventsScript(action: "keystroke \"v\" using {command down}", app: app))
+        if result.hasPrefix("applescript error") {
+            return accessibilityHint(result)
+        }
+        return "pasted \(text.count) characters (not verified visually)"
     }
 
     private func pressKey(_ key: String, modifiers: [String], app: String?) -> String {

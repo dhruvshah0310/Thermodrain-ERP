@@ -30,6 +30,9 @@ struct Config: Codable {
     // BCP-47 locale for speech recognition. "en-IN" understands Indian-accented English best;
     // "en-US", "en-GB", etc. also work. Falls back gracefully if the locale isn't supported.
     var speechLocale: String
+    // Let Claude search the web (Anthropic's server-side web_search tool) before answering.
+    // Requires a recent model (the default claude-sonnet-5 supports it).
+    var allowWebSearch: Bool
 
     static let `default` = Config(
         // Claude Code's internal short model names (e.g. "claude-sonnet-5") don't always match the
@@ -53,7 +56,8 @@ struct Config: Codable {
         followUpWindow: 8.0,
         greetOnLaunch: true,
         userName: nil,
-        speechLocale: "en-IN"
+        speechLocale: "en-IN",
+        allowWebSearch: true
     )
 
     // Resilient decoding: any key missing from an older config.json falls back to the default,
@@ -79,6 +83,7 @@ struct Config: Codable {
         greetOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .greetOnLaunch) ?? d.greetOnLaunch
         userName = try c.decodeIfPresent(String.self, forKey: .userName) ?? d.userName
         speechLocale = try c.decodeIfPresent(String.self, forKey: .speechLocale) ?? d.speechLocale
+        allowWebSearch = try c.decodeIfPresent(Bool.self, forKey: .allowWebSearch) ?? d.allowWebSearch
     }
 
     private init(
@@ -87,7 +92,7 @@ struct Config: Codable {
         workspaceDirectory: String, maxToolIterations: Int, launchAtLogin: Bool,
         silenceTimeout: Double, commandStartTimeout: Double,
         conversationMode: Bool, followUpWindow: Double, greetOnLaunch: Bool, userName: String?,
-        speechLocale: String
+        speechLocale: String, allowWebSearch: Bool
     ) {
         self.model = model
         self.wakeWord = wakeWord
@@ -107,6 +112,7 @@ struct Config: Codable {
         self.greetOnLaunch = greetOnLaunch
         self.userName = userName
         self.speechLocale = speechLocale
+        self.allowWebSearch = allowWebSearch
     }
 
     var workspaceURL: URL {

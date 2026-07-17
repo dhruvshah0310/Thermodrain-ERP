@@ -90,6 +90,22 @@ enum JarvisTools {
                 ]
             ))
             tools.append(ToolDefinition(
+                name: "paste_text",
+                description: """
+                Put text on the clipboard and paste it (Cmd+V) into an app. More reliable than \
+                type_text for long messages, emoji, or special characters. Pass app to direct it \
+                to a specific app (recommended).
+                """,
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "text": ["type": "string", "description": "The text to paste"],
+                        "app": ["type": "string", "description": "App name to paste into (e.g. \"WhatsApp\"); activated first. Recommended."]
+                    ],
+                    "required": ["text"]
+                ]
+            ))
+            tools.append(ToolDefinition(
                 name: "wait",
                 description: "Pause briefly (e.g. to let an app finish opening before typing into it). Keep it short — a second or two.",
                 inputSchema: [
@@ -145,6 +161,19 @@ enum JarvisTools {
             ))
         }
 
+        return tools
+    }
+
+    /// Anthropic-hosted server tools (executed on Anthropic's side, not by us). Currently just web
+    /// search, which lets Claude look things up before answering. Declared as raw dictionaries
+    /// because their shape (type + name) differs from client tools.
+    static func serverTools(config: Config) -> [[String: Any]] {
+        var tools: [[String: Any]] = []
+        if config.allowWebSearch {
+            // The 20260209 variant (with dynamic filtering) is supported by the default
+            // claude-sonnet-5 model. Older models would need "web_search_20250305" instead.
+            tools.append(["type": "web_search_20260209", "name": "web_search", "max_uses": 5])
+        }
         return tools
     }
 }

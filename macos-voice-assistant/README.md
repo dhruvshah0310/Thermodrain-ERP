@@ -85,6 +85,7 @@ permanent location to point at:
 | `greetOnLaunch` | On by default. Speaks a time-appropriate greeting when the app starts. |
 | `userName` | Optional name for a personalized greeting (e.g. "Good morning, Dhruv."). `null` for none. |
 | `speechLocale` | Speech-recognition locale. `"en-IN"` (default) understands Indian-accented English best; `"en-US"`, `"en-GB"`, etc. also work. Falls back automatically if unsupported. |
+| `allowWebSearch` | On by default. Lets Claude search the web (Anthropic's hosted web-search tool) before answering. Needs a recent model — the default `claude-sonnet-5` supports it. |
 
 Restart the app after hand-editing the config file. `conversationMode`, `greetOnLaunch`, and the
 allow-flags also have menu bar toggles.
@@ -142,8 +143,19 @@ to let apps catch up. Its instructions include recipes for common tasks:
   message +91 98765 43210 on WhatsApp and say I'm running late."*
 - **Email (Apple Mail)** — composes and sends via Mail's AppleScript. Say *"Jarvis, email
   john@example.com with the subject Hello and tell him the report is ready."*
-- **Anything else** — it can focus an app and type/click through its UI.
-- **Questions / drafting / advice** — it just answers from Claude's knowledge, no app needed.
+- **Anything else** — it can focus an app and type/click through its UI. For long messages or
+  text with emoji/special characters it uses `paste_text` (clipboard + paste), which is more
+  reliable than typing key-by-key.
+- **Questions / drafting / advice** — it answers from Claude's knowledge.
+- **Looking things up** — when the answer needs current or factual info (news, weather, prices,
+  scores, recent events), Jarvis searches the web first via Anthropic's hosted web-search tool
+  (`allowWebSearch`, on by default) instead of guessing. Say *"Jarvis, what's the weather in
+  Mumbai right now?"* or *"Jarvis, who won the match last night?"*
+
+**Model note:** the default model is `claude-sonnet-5` (fast, capable, supports web search). For
+the most capable/agentic behavior you can set `"model": "claude-opus-4-8"` in the config — higher
+quality, but more expensive per request. Verify the current model string at
+https://docs.anthropic.com/en/docs/about-claude/models.
 
 **One-time permission for this:** typing into other apps requires macOS **Accessibility**
 permission. The first time Jarvis tries it, macOS will prompt — or grant it yourself under

@@ -47,11 +47,20 @@ final class JarvisController {
     • Other apps without scripting support: open_application to focus them, then type_text and \
     press_key to drive their interface, with short wait calls in between so the UI keeps up.
 
-    • General knowledge, explanations, drafting text, advice: just answer directly from your own \
-    knowledge — that's the "learning from Claude" part, no tools needed.
+    • General knowledge, explanations, drafting text, advice: answer directly — that's the \
+    "learning from Claude" part. But when the answer depends on current or factual information \
+    you're not sure of (news, prices, weather, sports scores, recent events, specific facts, \
+    "look up X"), USE the web_search tool to check before answering rather than guessing. It's \
+    better to search and be right than to answer from stale memory.
 
-    Prefer doing the whole task in one go using several tool calls, then give a brief spoken \
-    confirmation of what you did.
+    • For long or special-character text (a full message, an email body, anything with emoji), \
+    prefer paste_text over type_text — it's more reliable. Pass app:"<AppName>" so it lands in \
+    the right place.
+
+    Work autonomously and thoroughly, like a capable assistant: research when useful, then do the \
+    whole task in one go with several tool calls, and finish with a brief spoken confirmation of \
+    what you did. Don't ask for permission on reversible actions that clearly follow from the \
+    request — just do them.
     """
 
     init() {
@@ -206,6 +215,7 @@ final class JarvisController {
 
         let client = ClaudeClient(apiKey: apiKey, model: config.model, maxIterations: config.maxToolIterations)
         let tools = JarvisTools.allTools(config: config)
+        let serverTools = JarvisTools.serverTools(config: config)
 
         Task {
             do {
@@ -213,6 +223,7 @@ final class JarvisController {
                     userText: command,
                     systemPrompt: Self.systemPrompt,
                     tools: tools,
+                    serverTools: serverTools,
                     executor: executor
                 )
                 Logger.shared.log("Reply: \(reply)")

@@ -14,6 +14,7 @@ struct ClaudeClient {
         userText: String,
         systemPrompt: String,
         tools: [ToolDefinition],
+        serverTools: [[String: Any]],
         executor: ToolExecutor
     ) async throws -> String {
         var messages: [[String: Any]] = [["role": "user", "content": userText]]
@@ -21,7 +22,7 @@ struct ClaudeClient {
 
         while iterations < maxIterations {
             iterations += 1
-            let response = try await callMessagesAPI(messages: messages, system: systemPrompt, tools: tools)
+            let response = try await callMessagesAPI(messages: messages, system: systemPrompt, tools: tools, serverTools: serverTools)
 
             guard let content = response["content"] as? [[String: Any]] else {
                 throw JarvisError.malformedResponse
@@ -39,6 +40,14 @@ struct ClaudeClient {
             }
 
             let stopReason = response["stop_reason"] as? String
+
+            // A server-side tool (like web search) ran but hit its internal iteration limit; re-send
+            // the assistant turn as-is so Anthropic resumes it — no tool result to add on our side.
+            if stopReason == "pause_turn" {
+                messages.append(["role": "assistant", "content": content])
+                continue
+            }
+
             if stopReason != "tool_use" || toolUses.isEmpty {
                 return textParts.joined(separator: "\n")
             }
@@ -61,7 +70,8 @@ struct ClaudeClient {
     private func callMessagesAPI(
         messages: [[String: Any]],
         system: String,
-        tools: [ToolDefinition]
+        tools: [ToolDefinition],
+        serverTools: [[String: Any]]
     ) async throws -> [String: Any] {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
@@ -74,7 +84,8 @@ struct ClaudeClient {
             "max_tokens": 2048,
             "system": system,
             "messages": messages,
-            "tools": tools.map { $0.jsonSchema }
+            // Client-executed tools plus any Anthropic-hosted server tools (e.g. web search).
+            "tools": tools.map { $0.jsonSchema } + serverTools
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
