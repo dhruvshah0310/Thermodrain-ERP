@@ -47,6 +47,9 @@ final class SpeechEngine {
     private var forceServerBasedRecognition = false
     private var isMuted = false
     private var awaitingFollowUp = false
+    // Command text committed from earlier recognition tasks during the *current* trigger. Lets a
+    // long/paused command survive the recognizer ending a task on its own end-of-speech detection.
+    private var accumulatedCommand = ""
 
     let wakeWord: String
     // Silence (after the command has started) before the command is considered complete.
@@ -66,16 +69,28 @@ final class SpeechEngine {
 
     init(
         wakeWord: String,
-        silenceTimeout: TimeInterval = 2.0,
+        silenceTimeout: TimeInterval = 2.5,
         commandStartTimeout: TimeInterval = 6.0,
         followUpWindow: TimeInterval = 8.0,
-        locale: Locale = Locale(identifier: "en-US")
+        localeIdentifier: String = "en-IN"
     ) {
         self.wakeWord = wakeWord.lowercased()
         self.silenceTimeout = silenceTimeout
         self.commandStartTimeout = commandStartTimeout
         self.followUpWindow = followUpWindow
-        self.recognizer = SFSpeechRecognizer(locale: locale)
+        self.recognizer = Self.makeRecognizer(preferred: localeIdentifier)
+    }
+
+    /// Build a recognizer for the requested locale, falling back to en-IN, then en-US, then the
+    /// system default, so an unsupported locale string never leaves Jarvis unable to listen.
+    private static func makeRecognizer(preferred: String) -> SFSpeechRecognizer? {
+        for identifier in [preferred, "en-IN", "en-US"] {
+            if let r = SFSpeechRecognizer(locale: Locale(identifier: identifier)) {
+                Logger.shared.log("Speech recognizer locale: \(identifier)")
+                return r
+            }
+        }
+        return SFSpeechRecognizer()
     }
 
     /// Stop/allow feeding audio into recognition without tearing anything down — used to keep
@@ -93,6 +108,7 @@ final class SpeechEngine {
             self.lastChangeTime = Date()
             self.triggerTime = Date()
             self.awaitingFollowUp = true
+            self.accumulatedCommand = ""
             self.state = .triggered
             self.onStateChange?(.triggered)
         }
@@ -139,7 +155,10 @@ final class SpeechEngine {
         try audioEngine.start()
     }
 
-    private func beginRecognition() throws {
+    /// Start a fresh recognition task. When `preserveCommand` is true we're rotating in the middle
+    /// of a command the user is still speaking, so the command-level state (triggered, accumulated
+    /// text, silence clock) is kept and only the per-task transcript is reset.
+    private func beginRecognition(preserveCommand: Bool = false) throws {
         guard let recognizer, recognizer.isAvailable else {
             throw JarvisError.speechRecognizerUnavailable
         }
@@ -156,9 +175,13 @@ final class SpeechEngine {
         rawTranscript = ""
         consumedCount = 0
         lastTranscript = ""
-        lastChangeTime = Date()
         sessionStartTime = Date()
-        state = .idle
+        if !preserveCommand {
+            lastChangeTime = Date()
+            state = .idle
+            accumulatedCommand = ""
+            awaitingFollowUp = false
+        }
 
         task = recognizer.recognitionTask(with: req) { [weak self] result, error in
             guard let self else { return }
@@ -194,6 +217,7 @@ final class SpeechEngine {
         if state == .idle, active.lowercased().contains(wakeWord) {
             state = .triggered
             triggerTime = Date()
+            accumulatedCommand = ""
             onStateChange?(.triggered)
         }
     }
@@ -206,14 +230,33 @@ final class SpeechEngine {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The full command so far: text committed from earlier tasks in this trigger, plus what the
+    /// current task has transcribed.
+    private func effectiveCommand() -> String {
+        let current = commandPortion(of: lastTranscript)
+        return (accumulatedCommand + " " + current).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Called (on main) when a recognition task ends — naturally (isFinal), on end-of-speech, or on
-    /// error. Rotates to a fresh task. Guarded so a burst of trailing errors from one dying task
-    /// can't spawn multiple overlapping rotations.
+    /// error. If the user is mid-command, commit what this task heard and rotate *without* losing
+    /// the command, so long/paused sentences survive. Guarded so a burst of trailing errors from
+    /// one dying task can't spawn multiple overlapping rotations.
     private func handleSessionEnd(error: Error?) {
         if let error {
             handleError(error)
         }
-        rotate(afterDelay: error == nil ? 0 : backoffDelay())
+        if state == .triggered {
+            let current = commandPortion(of: lastTranscript)
+            if !current.isEmpty {
+                accumulatedCommand = (accumulatedCommand + " " + current).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            // Clear the per-task transcript now (before the async rotation) so a tick landing in the
+            // rotation gap sees only the committed text, never it plus a stale copy of `current`.
+            lastTranscript = ""
+            rotate(afterDelay: error == nil ? 0 : backoffDelay(), preserveCommand: true)
+        } else {
+            rotate(afterDelay: error == nil ? 0 : backoffDelay(), preserveCommand: false)
+        }
     }
 
     private func handleError(_ error: Error) {
@@ -242,7 +285,7 @@ final class SpeechEngine {
         min(Double(consecutiveErrorCount) * 0.4, 4.0)
     }
 
-    private func rotate(afterDelay delay: TimeInterval) {
+    private func rotate(afterDelay delay: TimeInterval, preserveCommand: Bool = false) {
         guard !isRotating else { return }
         isRotating = true
 
@@ -254,18 +297,21 @@ final class SpeechEngine {
         request?.endAudio()
         request = nil
 
-        onStateChange?(.idle)
+        // Only drop the "listening/capturing" indicator back to idle when we're not mid-command.
+        if !preserveCommand {
+            onStateChange?(.idle)
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
             self.isRotating = false
             do {
-                try self.beginRecognition()
+                try self.beginRecognition(preserveCommand: preserveCommand)
             } catch {
                 Logger.shared.log("Failed to start a new recognition session: \(error.localizedDescription)")
                 // Try again shortly rather than dying silently.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    self?.rotate(afterDelay: 0)
+                    self?.rotate(afterDelay: 0, preserveCommand: preserveCommand)
                 }
             }
         }
@@ -274,7 +320,7 @@ final class SpeechEngine {
     private func tick() {
         let now = Date()
         if state == .triggered {
-            let command = commandPortion(of: lastTranscript)
+            let command = effectiveCommand()
             if command.isEmpty {
                 // Heard the wake word (or armed a follow-up) but no command yet — wait patiently,
                 // then give up quietly so the user isn't rushed. A follow-up gets a longer window.
@@ -298,6 +344,7 @@ final class SpeechEngine {
         lastTranscript = ""
         lastChangeTime = Date()
         awaitingFollowUp = false
+        accumulatedCommand = ""
         state = .idle
         onStateChange?(.idle)
     }

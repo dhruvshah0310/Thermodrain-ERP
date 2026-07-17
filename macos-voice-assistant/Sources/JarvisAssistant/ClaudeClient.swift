@@ -71,7 +71,7 @@ struct ClaudeClient {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 1024,
+            "max_tokens": 2048,
             "system": system,
             "messages": messages,
             "tools": tools.map { $0.jsonSchema }

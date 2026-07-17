@@ -33,6 +33,21 @@ actor ToolExecutor {
                 return "error: applescript disabled or missing script"
             }
             return runAppleScript(script)
+        case "type_text":
+            guard config.allowAppleScript, let text = input["text"] as? String else {
+                return "error: applescript disabled or missing text"
+            }
+            return typeText(text)
+        case "press_key":
+            guard config.allowAppleScript, let key = input["key"] as? String else {
+                return "error: applescript disabled or missing key"
+            }
+            let modifiers = input["modifiers"] as? [String] ?? []
+            return pressKey(key, modifiers: modifiers)
+        case "wait":
+            let seconds = min(max((input["seconds"] as? Double) ?? 1.0, 0), 5.0)
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            return "waited \(seconds)s"
         case "read_file":
             guard config.allowFileAccess, let path = input["path"] as? String else {
                 return "error: file access disabled or missing path"
@@ -78,6 +93,49 @@ actor ToolExecutor {
             return "applescript error: \(errorDict)"
         }
         return output.stringValue ?? "ok"
+    }
+
+    /// Escapes a string so it can be embedded inside an AppleScript double-quoted literal.
+    private func appleScriptLiteral(_ text: String) -> String {
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
+    private func typeText(_ text: String) -> String {
+        let script = "tell application \"System Events\" to keystroke \(appleScriptLiteral(text))"
+        let result = runAppleScript(script)
+        if result.hasPrefix("applescript error") {
+            return result + " (this usually means Jarvis needs Accessibility permission: System Settings > Privacy & Security > Accessibility)"
+        }
+        return "typed \(text.count) characters"
+    }
+
+    private func pressKey(_ key: String, modifiers: [String]) -> String {
+        let specialKeyCodes: [String: Int] = [
+            "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51,
+            "escape": 53, "left": 123, "right": 124, "down": 125, "up": 126
+        ]
+        let modifierClause: String
+        if modifiers.isEmpty {
+            modifierClause = ""
+        } else {
+            let mapped = modifiers.map { "\($0) down" }.joined(separator: ", ")
+            modifierClause = " using {\(mapped)}"
+        }
+
+        let action: String
+        if let code = specialKeyCodes[key.lowercased()] {
+            action = "key code \(code)\(modifierClause)"
+        } else {
+            action = "keystroke \(appleScriptLiteral(key))\(modifierClause)"
+        }
+        let result = runAppleScript("tell application \"System Events\" to \(action)")
+        if result.hasPrefix("applescript error") {
+            return result + " (this usually means Jarvis needs Accessibility permission: System Settings > Privacy & Security > Accessibility)"
+        }
+        return "pressed \(key)"
     }
 
     private func workspaceURL(for relativePath: String) -> URL? {

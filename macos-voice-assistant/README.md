@@ -84,6 +84,7 @@ permanent location to point at:
 | `followUpWindow` | Seconds to listen for a follow-up after a reply before returning to wake-word mode. |
 | `greetOnLaunch` | On by default. Speaks a time-appropriate greeting when the app starts. |
 | `userName` | Optional name for a personalized greeting (e.g. "Good morning, Dhruv."). `null` for none. |
+| `speechLocale` | Speech-recognition locale. `"en-IN"` (default) understands Indian-accented English best; `"en-US"`, `"en-GB"`, etc. also work. Falls back automatically if unsupported. |
 
 Restart the app after hand-editing the config file. `conversationMode`, `greetOnLaunch`, and the
 allow-flags also have menu bar toggles.
@@ -129,6 +130,33 @@ the app, so Jarvis starts automatically and greets you at every login.
 **Important:** `launchd` starts it headlessly at login — it can't show the Microphone / Speech
 Recognition permission prompts at that point. Launch the app manually once first and grant both
 permissions before enabling Launch at Login.
+
+## Doing things inside other apps
+
+Beyond opening apps and running AppleScript, Jarvis can drive app interfaces directly with the
+`type_text` and `press_key` tools (typing and key presses via System Events), plus a `wait` tool
+to let apps catch up. Its instructions include recipes for common tasks:
+
+- **WhatsApp** — opens `https://wa.me/<number>?text=…` (message pre-filled), waits, then presses
+  Return to send. It'll ask for the phone number if it doesn't have one. Say e.g. *"Jarvis,
+  message +91 98765 43210 on WhatsApp and say I'm running late."*
+- **Email (Apple Mail)** — composes and sends via Mail's AppleScript. Say *"Jarvis, email
+  john@example.com with the subject Hello and tell him the report is ready."*
+- **Anything else** — it can focus an app and type/click through its UI.
+- **Questions / drafting / advice** — it just answers from Claude's knowledge, no app needed.
+
+**One-time permission for this:** typing into other apps requires macOS **Accessibility**
+permission. The first time Jarvis tries it, macOS will prompt — or grant it yourself under
+**System Settings → Privacy & Security → Accessibility** by enabling JarvisAssistant. Without it,
+`type_text`/`press_key` fail (the tool result says so).
+
+## Understanding your accent
+
+Speech recognition defaults to **Indian English (`en-IN`)** via `speechLocale` in the config, which
+handles Indian-accented English far better than US English. For the best offline accuracy, add
+Indian English under **System Settings → Keyboard → Dictation → Languages** (and/or enable Siri in
+that language) so the on-device model is installed. Change `speechLocale` if you prefer another
+variant.
 
 ## Safety notes
 

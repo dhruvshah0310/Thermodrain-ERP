@@ -40,13 +40,58 @@ enum JarvisTools {
                 name: "run_applescript",
                 description: """
                 Run an AppleScript snippet to control Mac apps and system settings (Calendar, \
-                Reminders, Music, Notes, Finder, system volume, etc). Use this for anything \
-                Siri/Jarvis-like that isn't a plain app launch or file operation.
+                Reminders, Music, Notes, Mail, Finder, system volume, etc). Use this for anything \
+                Siri/Jarvis-like that isn't a plain app launch or file operation. For apps that \
+                aren't directly scriptable (like WhatsApp), drive their UI with System Events, or \
+                use the type_text / press_key tools.
                 """,
                 inputSchema: [
                     "type": "object",
                     "properties": ["script": ["type": "string", "description": "The AppleScript source to execute"]],
                     "required": ["script"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "type_text",
+                description: """
+                Type a string into whatever app is frontmost, as if typed on the keyboard (via \
+                System Events). Use it to fill in a message box, a search field, an email body, \
+                etc. Make sure the right app/field is focused first (open_application or open_url). \
+                Requires macOS Accessibility permission for Jarvis.
+                """,
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["text": ["type": "string", "description": "The text to type"]],
+                    "required": ["text"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "press_key",
+                description: """
+                Press a single key, optionally with modifiers, in the frontmost app (via System \
+                Events) — e.g. press "return" to send a message, or "c" with modifier "command" to \
+                copy. Requires macOS Accessibility permission for Jarvis.
+                """,
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "key": ["type": "string", "description": "Key to press: a single character, or one of: return, tab, space, delete, escape, up, down, left, right"],
+                        "modifiers": [
+                            "type": "array",
+                            "items": ["type": "string", "enum": ["command", "option", "control", "shift"]],
+                            "description": "Optional modifier keys held while pressing"
+                        ]
+                    ],
+                    "required": ["key"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "wait",
+                description: "Pause briefly (e.g. to let an app finish opening before typing into it). Keep it short — a second or two.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["seconds": ["type": "number", "description": "How long to wait, in seconds (max 5)"]],
+                    "required": ["seconds"]
                 ]
             ))
         }

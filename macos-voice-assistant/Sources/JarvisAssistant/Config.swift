@@ -27,6 +27,9 @@ struct Config: Codable {
     var greetOnLaunch: Bool
     // Optional name for a personalized greeting, e.g. "Good morning, Dhruv." Leave null for none.
     var userName: String?
+    // BCP-47 locale for speech recognition. "en-IN" understands Indian-accented English best;
+    // "en-US", "en-GB", etc. also work. Falls back gracefully if the locale isn't supported.
+    var speechLocale: String
 
     static let `default` = Config(
         // Claude Code's internal short model names (e.g. "claude-sonnet-5") don't always match the
@@ -42,14 +45,15 @@ struct Config: Codable {
         allowOpenApps: true,
         allowFileAccess: true,
         workspaceDirectory: "~/JarvisAssistant/workspace",
-        maxToolIterations: 6,
+        maxToolIterations: 10,
         launchAtLogin: false,
-        silenceTimeout: 2.0,
+        silenceTimeout: 2.5,
         commandStartTimeout: 6.0,
         conversationMode: true,
         followUpWindow: 8.0,
         greetOnLaunch: true,
-        userName: nil
+        userName: nil,
+        speechLocale: "en-IN"
     )
 
     // Resilient decoding: any key missing from an older config.json falls back to the default,
@@ -74,6 +78,7 @@ struct Config: Codable {
         followUpWindow = try c.decodeIfPresent(Double.self, forKey: .followUpWindow) ?? d.followUpWindow
         greetOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .greetOnLaunch) ?? d.greetOnLaunch
         userName = try c.decodeIfPresent(String.self, forKey: .userName) ?? d.userName
+        speechLocale = try c.decodeIfPresent(String.self, forKey: .speechLocale) ?? d.speechLocale
     }
 
     private init(
@@ -81,7 +86,8 @@ struct Config: Codable {
         allowShellCommands: Bool, allowAppleScript: Bool, allowOpenApps: Bool, allowFileAccess: Bool,
         workspaceDirectory: String, maxToolIterations: Int, launchAtLogin: Bool,
         silenceTimeout: Double, commandStartTimeout: Double,
-        conversationMode: Bool, followUpWindow: Double, greetOnLaunch: Bool, userName: String?
+        conversationMode: Bool, followUpWindow: Double, greetOnLaunch: Bool, userName: String?,
+        speechLocale: String
     ) {
         self.model = model
         self.wakeWord = wakeWord
@@ -100,6 +106,7 @@ struct Config: Codable {
         self.followUpWindow = followUpWindow
         self.greetOnLaunch = greetOnLaunch
         self.userName = userName
+        self.speechLocale = speechLocale
     }
 
     var workspaceURL: URL {
