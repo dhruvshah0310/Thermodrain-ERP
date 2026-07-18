@@ -16,6 +16,15 @@ final class ArcReactorView: NSView {
 
     private let coilCount = 12
 
+    // Live-glow state, updated ~30×/s by a timer so the core can react to microphone loudness while
+    // still gently "breathing" in silence.
+    private var targetLevel: CGFloat = 0     // most recent mic loudness, 0…1
+    private var displayLevel: CGFloat = 0    // eased value actually rendered
+    private var breathePhase: CGFloat = 0
+    private var breatheSpeed: CGFloat = 3.0  // set per mood
+    private var levelGain: CGFloat = 0.9     // how strongly the mic drives the glow, per mood
+    private var levelTimer: Timer?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -58,8 +67,10 @@ final class ArcReactorView: NSView {
         layer?.addSublayer(coreLayer)
 
         addRotation()
-        addPulse()
+        startGlowLoop()
     }
+
+    deinit { levelTimer?.invalidate() }
 
     override func layout() {
         super.layout()
@@ -105,35 +116,52 @@ final class ArcReactorView: NSView {
         coils.add(spin, forKey: "spin")
     }
 
-    private func addPulse() {
-        let scale = CABasicAnimation(keyPath: "transform.scale")
-        scale.fromValue = 0.86
-        scale.toValue = 1.06
-        scale.duration = 1.4
-        scale.autoreverses = true
-        scale.repeatCount = .infinity
-        scale.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        coreLayer.add(scale, forKey: "pulse")
-
-        let glow = CABasicAnimation(keyPath: "opacity")
-        glow.fromValue = 0.45
-        glow.toValue = 0.9
-        glow.duration = 1.4
-        glow.autoreverses = true
-        glow.repeatCount = .infinity
-        glow.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        glowLayer.add(glow, forKey: "breathe")
+    /// Feed the latest microphone loudness (0…1). Smoothed and rendered by the glow loop, so louder
+    /// speech drives a brighter, larger core.
+    func setLevel(_ level: Float) {
+        targetLevel = CGFloat(min(max(level, 0), 1))
     }
 
-    /// Switch color palette + energy for the current activity. `layer.speed` scales the running
-    /// spin/pulse animations smoothly without having to rebuild them.
+    /// A ~30 fps timer that eases the displayed level toward the live mic level and combines it with
+    /// a slow "breathing" so the reactor stays alive in silence. Drives the core scale + glow/shadow
+    /// opacities directly (implicit layer animations disabled so each frame lands immediately).
+    private func startGlowLoop() {
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            self?.stepGlow()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        levelTimer = timer
+    }
+
+    private func stepGlow() {
+        breathePhase += (1.0 / 30.0) * breatheSpeed
+        // Ease toward the target, and let the target sag when no fresh audio arrives.
+        displayLevel += (targetLevel - displayLevel) * 0.28
+        targetLevel *= 0.90
+
+        let breathe = 0.5 + 0.5 * sin(breathePhase)                // 0…1
+        let energy = min(1.0, breathe * 0.4 + displayLevel * levelGain)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let scale = 0.82 + 0.36 * energy
+        coreLayer.transform = CATransform3DMakeScale(scale, scale, 1)
+        coreLayer.opacity = Float(0.65 + 0.35 * energy)
+        glowLayer.opacity = Float(0.28 + 0.68 * energy)
+        outerRing.shadowOpacity = Float(0.4 + 0.55 * energy)
+        coilSeed.shadowOpacity = Float(0.35 + 0.55 * energy)
+        CATransaction.commit()
+    }
+
+    /// Switch color palette + energy for the current activity. Sets the coil spin speed and how much
+    /// the mic drives the glow: listening reacts most to your voice; thinking runs hotter on its own.
     func setMood(_ mood: Mood) {
         let tint: NSColor
-        let speed: Float
+        let spinSpeed: Float
         switch mood {
-        case .listening: tint = NSColor(calibratedRed: 0.36, green: 0.80, blue: 1.0, alpha: 1); speed = 1.0
-        case .thinking:  tint = NSColor(calibratedRed: 0.42, green: 0.90, blue: 1.0, alpha: 1); speed = 2.2
-        case .speaking:  tint = NSColor(calibratedRed: 0.30, green: 0.70, blue: 1.0, alpha: 1); speed = 1.5
+        case .listening: tint = NSColor(calibratedRed: 0.36, green: 0.80, blue: 1.0, alpha: 1); spinSpeed = 1.0; breatheSpeed = 3.0; levelGain = 1.0
+        case .thinking:  tint = NSColor(calibratedRed: 0.42, green: 0.90, blue: 1.0, alpha: 1); spinSpeed = 2.4; breatheSpeed = 6.0; levelGain = 0.35
+        case .speaking:  tint = NSColor(calibratedRed: 0.30, green: 0.70, blue: 1.0, alpha: 1); spinSpeed = 1.6; breatheSpeed = 4.0; levelGain = 0.75
         }
 
         let bright = tint.blended(withFraction: 0.55, of: .white) ?? tint
@@ -143,22 +171,18 @@ final class ArcReactorView: NSView {
         outerRing.strokeColor = tint.withAlphaComponent(0.9).cgColor
         outerRing.shadowColor = tint.cgColor
         outerRing.shadowRadius = 8
-        outerRing.shadowOpacity = 0.9
         outerRing.shadowOffset = .zero
         innerRing.strokeColor = bright.withAlphaComponent(0.85).cgColor
         coilSeed.fillColor = tint.withAlphaComponent(0.95).cgColor
         coilSeed.strokeColor = NSColor.clear.cgColor
         coilSeed.shadowColor = tint.cgColor
         coilSeed.shadowRadius = 4
-        coilSeed.shadowOpacity = 0.8
         coilSeed.shadowOffset = .zero
         coreLayer.colors = [bright.cgColor, tint.withAlphaComponent(0.7).cgColor, tint.withAlphaComponent(0.0).cgColor]
         coreLayer.locations = [0, 0.5, 1]
         glowLayer.colors = [tint.withAlphaComponent(0.55).cgColor, tint.withAlphaComponent(0.0).cgColor]
         glowLayer.locations = [0, 1]
-        coils.speed = speed
-        coreLayer.speed = speed
-        glowLayer.speed = speed
+        coils.speed = spinSpeed
         CATransaction.commit()
     }
 }
@@ -245,6 +269,11 @@ final class HUDWindowController {
 
     func showSpeaking(_ reply: String) {
         present(status: "Jarvis", message: reply.trimmingCharacters(in: .whitespacesAndNewlines), mood: .speaking)
+    }
+
+    /// Live microphone loudness (0…1) → the arc reactor's glow.
+    func setLevel(_ level: Float) {
+        reactor.setLevel(level)
     }
 
     private func present(status: String, message: String, mood: ArcReactorView.Mood) {

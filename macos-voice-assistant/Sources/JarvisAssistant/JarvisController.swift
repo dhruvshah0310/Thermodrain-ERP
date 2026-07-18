@@ -197,6 +197,11 @@ final class JarvisController {
             self.speechEngine.onCommand = { [weak self] command in
                 self?.handle(command: command)
             }
+            if self.overlay != nil {
+                self.speechEngine.onAudioLevel = { [weak self] level in
+                    self?.overlay?.setLevel(level)
+                }
+            }
 
             do {
                 try self.speechEngine.start()

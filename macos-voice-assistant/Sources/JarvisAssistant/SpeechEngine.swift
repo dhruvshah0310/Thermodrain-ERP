@@ -66,6 +66,10 @@ final class SpeechEngine {
 
     var onStateChange: ((State) -> Void)?
     var onCommand: ((String) -> Void)?
+    // Live microphone loudness, 0…1, emitted on the main thread for the reactor's glow. Fires
+    // continuously while the audio engine runs (even while muted), so the visual can react to
+    // whoever is speaking.
+    var onAudioLevel: ((Float) -> Void)?
 
     init(
         wakeWord: String,
@@ -91,6 +95,23 @@ final class SpeechEngine {
             }
         }
         return SFSpeechRecognizer()
+    }
+
+    /// Root-mean-square loudness of a PCM buffer, mapped to a roughly 0…1 range with a bit of gain
+    /// so normal speech lands mid-scale. Runs on the audio thread, so it's a tight, allocation-free
+    /// loop over the first channel's samples.
+    private static func loudness(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let channels = buffer.floatChannelData else { return 0 }
+        let count = Int(buffer.frameLength)
+        guard count > 0 else { return 0 }
+        let samples = channels[0]
+        var sumSquares: Float = 0
+        for i in 0..<count {
+            let s = samples[i]
+            sumSquares += s * s
+        }
+        let rms = (sumSquares / Float(count)).squareRoot()
+        return min(1.0, rms * 9.0)
     }
 
     /// Stop/allow feeding audio into recognition without tearing anything down — used to keep
@@ -146,9 +167,14 @@ final class SpeechEngine {
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            // Runs on an audio thread; only touch the thread-safe request append.
-            guard let self, !self.isMuted else { return }
-            self.request?.append(buffer)
+            // Runs on an audio thread. Feed recognition only when un-muted, but always measure the
+            // loudness so the reactor's glow can track the speaker's voice.
+            guard let self else { return }
+            if !self.isMuted { self.request?.append(buffer) }
+            if self.onAudioLevel != nil {
+                let level = Self.loudness(of: buffer)
+                DispatchQueue.main.async { self.onAudioLevel?(level) }
+            }
         }
         tapInstalled = true
         audioEngine.prepare()
