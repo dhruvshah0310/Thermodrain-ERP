@@ -22,7 +22,10 @@ final class Logger {
         let stamp = ISO8601DateFormatter().string(from: Date())
         let line = "[\(stamp)] \(message)"
         queue.async {
-            print(line)
+            // Write to stderr, never stdout: in MCP-server mode stdout carries JSON-RPC and any
+            // stray text there would corrupt the protocol stream. stderr is still visible in a
+            // terminal for the menu-bar app.
+            FileHandle.standardError.write(Data((line + "\n").utf8))
             self.recentLinesStorage.append(line)
             if self.recentLinesStorage.count > 200 {
                 self.recentLinesStorage.removeFirst()

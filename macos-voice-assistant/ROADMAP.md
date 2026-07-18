@@ -6,9 +6,10 @@ does everything on the Mac a human can, accuracy over speed. Items get checked o
 
 ## In progress / next
 
-- [ ] **Clipboard read/write tools** — `read_clipboard`, `set_clipboard`.
 - [ ] **System control tools** — volume, brightness, mute, Do Not Disturb, sleep/lock, media
       play/pause.
+- [ ] **Dedicated app tools** — Calendar, Reminders, Notes, Messages (iMessage), Music, Finder.
+- [ ] **Full file access mode** (config-gated) — read/write/move/delete/list anywhere on disk.
 
 ## Backlog (rough priority)
 
@@ -44,3 +45,7 @@ does everything on the Mac a human can, accuracy over speed. Items get checked o
       a specific URL's full content, gated by `allowWebSearch`.
 - [x] **Screen context tool** — `get_screen_context` reports the frontmost app + front window
       title so Jarvis knows what "this"/"the current window" refers to.
+- [x] **Clipboard tools** — `read_clipboard` and `set_clipboard`.
+- [x] **MCP connector** — the same binary runs as an MCP server (`--mcp`, stdio JSON-RPC) exposing
+      all local Mac-control tools, so Claude Desktop can operate the Mac. Logger now writes to
+      stderr so it never corrupts the protocol stream on stdout.

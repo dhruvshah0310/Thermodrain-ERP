@@ -189,6 +189,52 @@ Indian English under **System Settings → Keyboard → Dictation → Languages*
 that language) so the on-device model is installed. Change `speechLocale` if you prefer another
 variant.
 
+## Using it from Claude Desktop (MCP connector)
+
+The same binary can run as an **MCP server**, exposing all of Jarvis's Mac-control tools (open
+apps, AppleScript, mouse, screenshot, type/paste, clipboard, files, screen context, and — if
+enabled — shell) to any MCP client. The main use: **let Claude Desktop operate your Mac.** You
+talk or type to Claude, and Claude drives your computer through these tools — no wake word needed.
+
+It's the same executable, just launched with `--mcp` instead of as the menu-bar app:
+
+```bash
+.build/release/JarvisAssistant --mcp
+```
+
+In that mode there's no menu bar and no microphone — it just speaks the MCP protocol
+(newline-delimited JSON-RPC 2.0) on stdin/stdout. Web search/fetch are intentionally *not* exposed
+over MCP, because Claude Desktop has its own web tools; this server offers the **local Mac** tools.
+
+**Connect it to Claude Desktop:**
+
+1. Build the binary (`swift build -c release`, or `./Scripts/package_app.sh`).
+2. Open Claude Desktop's config file: **Settings → Developer → Edit Config**, or edit
+   `~/Library/Application Support/Claude/claude_desktop_config.json` directly.
+3. Add a server entry pointing at the binary (use the real absolute path):
+
+   ```json
+   {
+     "mcpServers": {
+       "jarvis": {
+         "command": "/Users/YOU/Applications/JarvisAssistant.app/Contents/MacOS/JarvisAssistant",
+         "args": ["--mcp"]
+       }
+     }
+   }
+   ```
+   (If you didn't package the `.app`, point at `.build/release/JarvisAssistant` instead.)
+4. Fully quit and reopen Claude Desktop. The `jarvis` tools appear in the tools menu.
+5. **Permissions:** the tools still need macOS **Accessibility** (mouse/typing) and **Screen
+   Recording** (screenshots). Because Claude Desktop launches the server, grant those to
+   **Claude Desktop** under System Settings → Privacy & Security (not just to JarvisAssistant).
+
+Now you can tell Claude things like "open Safari and search for…", "take a screenshot and click
+the blue button", "read my clipboard and summarize it" — and it acts on your actual Mac.
+
+Config flags (`allowShellCommands`, `allowScreenControl`, etc.) gate what the MCP server exposes,
+exactly as they do for the voice app — the two modes share one `config.json`.
+
 ## Safety notes
 
 - **AppleScript control is on by default** — that's what makes it feel like Jarvis (volume,

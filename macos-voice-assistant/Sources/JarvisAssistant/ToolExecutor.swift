@@ -97,6 +97,17 @@ actor ToolExecutor {
         case "get_screen_context":
             guard config.allowAppleScript else { return "error: applescript disabled" }
             return getScreenContext()
+        case "read_clipboard":
+            guard config.allowAppleScript else { return "error: applescript disabled" }
+            let text = NSPasteboard.general.string(forType: .string) ?? ""
+            return text.isEmpty ? "(clipboard is empty or has no text)" : text
+        case "set_clipboard":
+            guard config.allowAppleScript, let text = input["text"] as? String else {
+                return "error: applescript disabled or missing text"
+            }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            return "clipboard set (\(text.count) characters)"
         case "read_file":
             guard config.allowFileAccess, let path = input["path"] as? String else {
                 return "error: file access disabled or missing path"

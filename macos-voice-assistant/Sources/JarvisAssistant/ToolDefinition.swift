@@ -123,6 +123,20 @@ enum JarvisTools {
                 """,
                 inputSchema: ["type": "object", "properties": [String: Any]()]
             ))
+            tools.append(ToolDefinition(
+                name: "read_clipboard",
+                description: "Read the current text contents of the macOS clipboard.",
+                inputSchema: ["type": "object", "properties": [String: Any]()]
+            ))
+            tools.append(ToolDefinition(
+                name: "set_clipboard",
+                description: "Replace the macOS clipboard with the given text.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["text": ["type": "string", "description": "Text to put on the clipboard"]],
+                    "required": ["text"]
+                ]
+            ))
         }
 
         if config.allowScreenControl {
