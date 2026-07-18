@@ -13,6 +13,9 @@ final class JarvisController {
     // True while a command is being handled (thinking → speaking). Used so the overlay isn't hidden
     // by the speech engine's idle rotations that happen underneath while Jarvis is busy.
     private var isBusy = false
+    // True while Jarvis is speaking. While set, the reactor's glow is driven by the text-to-speech
+    // output level (not the microphone), so it pulses precisely to Jarvis's own voice.
+    private var isSpeaking = false
 
     // Rolling conversation memory: the last few plain-text user/assistant turns, so follow-up
     // commands ("reply to him", "open it", "what about tomorrow?") carry context. Kept text-only
@@ -198,8 +201,15 @@ final class JarvisController {
                 self?.handle(command: command)
             }
             if self.overlay != nil {
+                // Microphone level drives the reactor except while Jarvis is speaking…
                 self.speechEngine.onAudioLevel = { [weak self] level in
-                    self?.overlay?.setLevel(level)
+                    guard let self, !self.isSpeaking else { return }
+                    self.overlay?.setLevel(level)
+                }
+                // …when the text-to-speech output level takes over, so it pulses to Jarvis's voice.
+                self.speechOutput.onAudioLevel = { [weak self] level in
+                    guard let self, self.isSpeaking else { return }
+                    self.overlay?.setLevel(level)
                 }
             }
 
@@ -234,10 +244,12 @@ final class JarvisController {
     /// or return to wake-word idle.
     private func speak(_ text: String) {
         speechEngine.setMuted(true)
+        isSpeaking = true
         statusBar.setState(.speaking)
         speechOutput.speak(text, voiceIdentifier: config.voiceIdentifier, gender: config.voiceGender, rate: config.speechRate) { [weak self] in
             guard let self else { return }
             self.isBusy = false
+            self.isSpeaking = false
             self.speechEngine.setMuted(false)
             if self.config.conversationMode {
                 // armFollowUp fires .triggered, which re-shows the overlay in listening mode.
