@@ -94,6 +94,9 @@ actor ToolExecutor {
             let seconds = min(max((input["seconds"] as? Double) ?? 1.0, 0), 5.0)
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             return "waited \(seconds)s"
+        case "get_screen_context":
+            guard config.allowAppleScript else { return "error: applescript disabled" }
+            return getScreenContext()
         case "read_file":
             guard config.allowFileAccess, let path = input["path"] as? String else {
                 return "error: file access disabled or missing path"
@@ -114,6 +117,30 @@ actor ToolExecutor {
         default:
             return "error: unknown tool \(name)"
         }
+    }
+
+    private func getScreenContext() -> String {
+        let script = """
+        tell application "System Events"
+            set frontApp to name of first application process whose frontmost is true
+            set winTitle to ""
+            try
+                set winTitle to name of front window of (first application process whose frontmost is true)
+            end try
+        end tell
+        return frontApp & " | " & winTitle
+        """
+        let result = runAppleScript(script)
+        if result.hasPrefix("applescript error") {
+            return accessibilityHint(result)
+        }
+        let parts = result.components(separatedBy: " | ")
+        let app = parts.first ?? result
+        let window = parts.count > 1 ? parts[1] : ""
+        if window.isEmpty {
+            return "Frontmost app: \(app). (No window title available.)"
+        }
+        return "Frontmost app: \(app). Front window: \"\(window)\"."
     }
 
     private func numeric(_ value: Any?) -> Double? {

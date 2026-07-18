@@ -6,16 +6,13 @@ does everything on the Mac a human can, accuracy over speed. Items get checked o
 
 ## In progress / next
 
-- [ ] **web_fetch server tool** — let Claude read a specific URL's contents (Anthropic hosted).
-- [ ] **Read screen context** — frontmost app name + window title + selected text, injected so
-      Claude always knows what the user is looking at.
+- [ ] **Clipboard read/write tools** — `read_clipboard`, `set_clipboard`.
+- [ ] **System control tools** — volume, brightness, mute, Do Not Disturb, sleep/lock, media
+      play/pause.
 
 ## Backlog (rough priority)
 
-- [ ] **web_fetch server tool** — let Claude read a specific URL's contents (Anthropic hosted).
 - [ ] **Clipboard read/write tools** — `read_clipboard`, `set_clipboard`.
-- [ ] **Read screen context** — frontmost app name + window title + selected text, injected so
-      Claude always knows what the user is looking at.
 - [ ] **System control tools** — volume, brightness, mute, Do Not Disturb, sleep/lock, wifi
       toggle, media play/pause, screenshot-to-file.
 - [ ] **Full file access mode** (config-gated, off by default) — read/write/move/delete files
@@ -43,3 +40,7 @@ does everything on the Mac a human can, accuracy over speed. Items get checked o
       CoreGraphics CGEvent (native, top-left-origin point coords matching the screenshot).
 - [x] **Screen-aware action loop** — system prompt tells Jarvis to screenshot → look → act →
       screenshot to verify. Gated by `allowScreenControl` (+ menu toggle).
+- [x] **web_fetch server tool** — added alongside web_search (both `_20260209`) so Claude can read
+      a specific URL's full content, gated by `allowWebSearch`.
+- [x] **Screen context tool** — `get_screen_context` reports the frontmost app + front window
+      title so Jarvis knows what "this"/"the current window" refers to.

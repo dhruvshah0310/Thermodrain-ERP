@@ -114,6 +114,15 @@ enum JarvisTools {
                     "required": ["seconds"]
                 ]
             ))
+            tools.append(ToolDefinition(
+                name: "get_screen_context",
+                description: """
+                Report what the user is currently looking at: the frontmost app's name and its \
+                front window's title. Call this when a command is about "this", "the current \
+                window", "what's open", etc., so you know the context before acting.
+                """,
+                inputSchema: ["type": "object", "properties": [String: Any]()]
+            ))
         }
 
         if config.allowScreenControl {
@@ -238,9 +247,12 @@ enum JarvisTools {
     static func serverTools(config: Config) -> [[String: Any]] {
         var tools: [[String: Any]] = []
         if config.allowWebSearch {
-            // The 20260209 variant (with dynamic filtering) is supported by the default
+            // The 20260209 variants (with dynamic filtering) are supported by the default
             // claude-sonnet-5 model. Older models would need "web_search_20250305" instead.
             tools.append(["type": "web_search_20260209", "name": "web_search", "max_uses": 5])
+            // web_fetch reads the full content of a specific URL already mentioned in the
+            // conversation (e.g. a link the user said, or one web_search returned).
+            tools.append(["type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 5])
         }
         return tools
     }
