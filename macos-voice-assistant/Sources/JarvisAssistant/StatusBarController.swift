@@ -123,6 +123,11 @@ final class StatusBarController {
         overlayItem.state = assistant.config.showOverlay ? .on : .off
         menu.addItem(overlayItem)
 
+        let motionItem = NSMenuItem(title: "Motion Control (camera hand gestures)", action: #selector(toggleMotionControl), keyEquivalent: "")
+        motionItem.target = self
+        motionItem.state = assistant.config.allowMotionControl ? .on : .off
+        menu.addItem(motionItem)
+
         let screenItem = NSMenuItem(title: "Allow Screen Control (see & click)", action: #selector(toggleScreenControl), keyEquivalent: "")
         screenItem.target = self
         screenItem.state = assistant.config.allowScreenControl ? .on : .off
@@ -269,6 +274,13 @@ final class StatusBarController {
     @objc private func toggleOverlay() {
         assistant.config.showOverlay.toggle()
         assistant.config.save()
+        buildMenu()
+    }
+
+    @objc private func toggleMotionControl() {
+        assistant.config.allowMotionControl.toggle()
+        assistant.config.save()
+        assistant.setMotionControlEnabled(assistant.config.allowMotionControl)
         buildMenu()
     }
 

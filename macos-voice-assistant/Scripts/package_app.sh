@@ -46,6 +46,8 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
         <string>Jarvis transcribes your spoken commands so it can act on them.</string>
     <key>NSAppleEventsUsageDescription</key>
         <string>Jarvis controls apps (AppleScript / System Events) to carry out your commands.</string>
+    <key>NSCameraUsageDescription</key>
+        <string>Jarvis uses the camera for hand-gesture motion control when you enable it.</string>
 </dict>
 </plist>
 PLIST

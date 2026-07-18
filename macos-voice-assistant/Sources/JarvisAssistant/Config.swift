@@ -50,9 +50,12 @@ struct Config: Codable {
     // After UI actions (typing, clicking, sending a message), nudge Claude to screenshot and
     // confirm the effect before reporting success — accuracy over speed. Needs allowScreenControl.
     var verifyActions: Bool
-    // Show the Siri-style floating window (with the arc-reactor animation) while Jarvis is
-    // listening, thinking, and speaking. Turn off for a purely menu-bar, no-window experience.
+    // Show the Siri-style floating window (with Sumo) while Jarvis is listening, thinking, and
+    // speaking. Turn off for a purely menu-bar, no-window experience.
     var showOverlay: Bool
+    // Camera hand-gesture control: point to move the cursor, pinch to click, two fingers to scroll,
+    // open-palm swipe to switch Spaces, pinch-spread to zoom. Off by default; needs Camera access.
+    var allowMotionControl: Bool
 
     static let `default` = Config(
         // Claude Code's internal short model names (e.g. "claude-sonnet-5") don't always match the
@@ -83,7 +86,8 @@ struct Config: Codable {
         allowScreenControl: true,
         conversationMemoryTimeout: 180,
         verifyActions: true,
-        showOverlay: true
+        showOverlay: true,
+        allowMotionControl: false
     )
 
     // Resilient decoding: any key missing from an older config.json falls back to the default,
@@ -116,6 +120,7 @@ struct Config: Codable {
         conversationMemoryTimeout = try c.decodeIfPresent(Double.self, forKey: .conversationMemoryTimeout) ?? d.conversationMemoryTimeout
         verifyActions = try c.decodeIfPresent(Bool.self, forKey: .verifyActions) ?? d.verifyActions
         showOverlay = try c.decodeIfPresent(Bool.self, forKey: .showOverlay) ?? d.showOverlay
+        allowMotionControl = try c.decodeIfPresent(Bool.self, forKey: .allowMotionControl) ?? d.allowMotionControl
     }
 
     private init(
@@ -126,7 +131,8 @@ struct Config: Codable {
         silenceTimeout: Double, commandStartTimeout: Double,
         conversationMode: Bool, followUpWindow: Double, greetOnLaunch: Bool, userName: String?,
         speechLocale: String, allowWebSearch: Bool, allowScreenControl: Bool,
-        conversationMemoryTimeout: Double, verifyActions: Bool, showOverlay: Bool
+        conversationMemoryTimeout: Double, verifyActions: Bool, showOverlay: Bool,
+        allowMotionControl: Bool
     ) {
         self.model = model
         self.wakeWord = wakeWord
@@ -153,6 +159,7 @@ struct Config: Codable {
         self.conversationMemoryTimeout = conversationMemoryTimeout
         self.verifyActions = verifyActions
         self.showOverlay = showOverlay
+        self.allowMotionControl = allowMotionControl
     }
 
     var workspaceURL: URL {

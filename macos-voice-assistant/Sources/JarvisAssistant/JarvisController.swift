@@ -8,8 +8,10 @@ final class JarvisController {
     private let speechEngine: SpeechEngine
     private let speechOutput = SpeechOutput()
     private var statusBar: StatusBarController!
-    // Siri-style floating window (arc-reactor). Created on launch when config.showOverlay is on.
+    // Siri-style floating window (Sumo). Created on launch when config.showOverlay is on.
     private var overlay: HUDWindowController?
+    // Camera hand-gesture control. Created when config.allowMotionControl is on (or toggled).
+    private var motionControl: MotionControl?
     // True while a command is being handled (thinking → speaking). Used so the overlay isn't hidden
     // by the speech engine's idle rotations that happen underneath while Jarvis is busy.
     private var isBusy = false
@@ -155,6 +157,16 @@ final class JarvisController {
         apiKey = KeychainStore.loadAPIKey()
     }
 
+    /// Start or stop camera hand-gesture control (from the menu toggle or launch config).
+    func setMotionControlEnabled(_ enabled: Bool) {
+        if enabled {
+            if motionControl == nil { motionControl = MotionControl() }
+            motionControl?.start()
+        } else {
+            motionControl?.stop()
+        }
+    }
+
     /// Stop capturing audio while a blocking dialog (e.g. the API key prompt) is on screen.
     /// Showing an NSAlert modal while the recognition task keeps running has been observed to
     /// leave the task in a permanently broken state, so callers should pause around any
@@ -184,6 +196,9 @@ final class JarvisController {
 
             if self.config.showOverlay {
                 self.overlay = HUDWindowController()
+            }
+            if self.config.allowMotionControl {
+                self.setMotionControlEnabled(true)
             }
 
             self.speechEngine.onStateChange = { [weak self] state in
@@ -286,6 +301,14 @@ final class JarvisController {
     private func handle(command: String) {
         guard !command.isEmpty else { return }
 
+        // Ignore any command that arrives while we're still handling the previous one. Without this,
+        // speech recognized during the Claude round-trip (or an echo) could start a second reply,
+        // which sounds like Jarvis repeating itself.
+        guard !isBusy else {
+            Logger.shared.log("Ignoring command while busy: \(command)")
+            return
+        }
+
         guard let apiKey else {
             Logger.shared.log("No API key set — open the menu bar icon and choose 'Set Anthropic API Key…'.")
             speak("I don't have an API key yet. Set one from my menu bar icon.")
@@ -295,6 +318,9 @@ final class JarvisController {
         Logger.shared.log("Command: \(command)")
         statusBar.setState(.thinking)
         isBusy = true
+        // Stop feeding the mic into recognition for the whole thinking+speaking span, so nothing new
+        // is captured until Jarvis is done and back to listening.
+        speechEngine.setMuted(true)
         overlay?.showThinking(command)
 
         // Drop stale context: if it's been a while since the last command, start fresh so an

@@ -1,38 +1,31 @@
 import AppKit
 
-/// Sumo — Thermodrain's mascot — drawn procedurally so he can act out what Jarvis is doing:
-///   • listening  → leans in and cups a hand to his ear
-///   • thinking    → sinks into a cross-legged meditation pose, eyes closed
-///   • speaking    → mouth moves in time with Jarvis's voice while his hands gesture
-/// He also springs in with a little bounce when he appears. All state is a set of eased parameters
-/// advanced by a ~30 fps timer; `draw(_:)` renders the current pose from them, so pose changes are
-/// just smooth interpolations rather than a rigged layer tree.
+/// Sumo — Thermodrain's mascot — drawn as sleek line-art (outline only, no fills): navy contours with
+/// gold/orange accent strokes, and an angry, furrowed expression. He acts out what Jarvis is doing:
+///   • listening → head leans in, one hand cupped to the ear
+///   • thinking   → drops into a low sumo squat, eyes narrowed in focus
+///   • speaking   → mouth moves in time with Jarvis's voice while his hands gesture
+/// He springs in with a bounce. All state is a set of eased parameters advanced by a ~30 fps timer;
+/// `draw(_:)` re-renders the current pose from them, so pose changes are smooth interpolations.
 final class SumoView: NSView {
     enum Pose { case listening, thinking, speaking }
 
-    // Targets set by the current pose; `cur*` values ease toward them each frame.
-    private var tSeated: CGFloat = 0, curSeated: CGFloat = 0
-    private var tEar: CGFloat = 0, curEar: CGFloat = 0
-    private var tGesture: CGFloat = 0, curGesture: CGFloat = 0
-    private var tEyesClosed: CGFloat = 0, curEyesClosed: CGFloat = 0
-    private var tTilt: CGFloat = 0, curTilt: CGFloat = 0
-    private var tMouth: CGFloat = 0, curMouth: CGFloat = 0   // 0…1 mouth openness (voice level)
+    private var tSquat: CGFloat = 0, cSquat: CGFloat = 0
+    private var tEar: CGFloat = 0, cEar: CGFloat = 0
+    private var tGesture: CGFloat = 0, cGesture: CGFloat = 0
+    private var tNarrow: CGFloat = 0, cNarrow: CGFloat = 0   // eyes narrowed (focus)
+    private var tTilt: CGFloat = 0, cTilt: CGFloat = 0
+    private var tMouth: CGFloat = 0, cMouth: CGFloat = 0
 
     private var bobPhase: CGFloat = 0
     private var gesturePhase: CGFloat = 0
-
-    // Entrance spring (bouncy pop-in).
     private var appearPos: CGFloat = 0, appearVel: CGFloat = 0
-
     private var timer: Timer?
 
-    // Palette — Thermodrain steel-blue mawashi against warm skin.
-    private let skin      = NSColor(calibratedRed: 0.95, green: 0.80, blue: 0.66, alpha: 1)
-    private let skinShade = NSColor(calibratedRed: 0.86, green: 0.68, blue: 0.53, alpha: 1)
-    private let belt      = NSColor(calibratedRed: 0.11, green: 0.36, blue: 0.62, alpha: 1)
-    private let beltDark  = NSColor(calibratedRed: 0.07, green: 0.26, blue: 0.47, alpha: 1)
-    private let hair      = NSColor(calibratedRed: 0.16, green: 0.14, blue: 0.15, alpha: 1)
-    private let mouthCol  = NSColor(calibratedRed: 0.45, green: 0.16, blue: 0.16, alpha: 1)
+    // Line-art palette: deep navy contour, warm gold + orange accents (as in the reference).
+    private let navy   = NSColor(calibratedRed: 0.10, green: 0.22, blue: 0.42, alpha: 1)
+    private let gold   = NSColor(calibratedRed: 0.86, green: 0.64, blue: 0.20, alpha: 1)
+    private let orange = NSColor(calibratedRed: 0.87, green: 0.42, blue: 0.18, alpha: 1)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -46,30 +39,21 @@ final class SumoView: NSView {
     }
     deinit { timer?.invalidate() }
 
-    override var isFlipped: Bool { false }  // y-up: feet at the bottom
+    override var isFlipped: Bool { false }
 
-    // MARK: - Public API
+    // MARK: - API
 
     func setPose(_ pose: Pose) {
         switch pose {
-        case .listening: tSeated = 0; tEar = 1; tGesture = 0; tEyesClosed = 0; tTilt = 0.14
-        case .thinking:  tSeated = 1; tEar = 0; tGesture = 0; tEyesClosed = 1; tTilt = 0
-        case .speaking:  tSeated = 0; tEar = 0; tGesture = 1; tEyesClosed = 0; tTilt = 0
+        case .listening: tSquat = 0; tEar = 1; tGesture = 0; tNarrow = 0.35; tTilt = 0.13
+        case .thinking:  tSquat = 1; tEar = 0; tGesture = 0; tNarrow = 0.75; tTilt = 0
+        case .speaking:  tSquat = 0; tEar = 0; tGesture = 1; tNarrow = 0.2;  tTilt = 0
         }
     }
+    func setLevel(_ level: Float) { tMouth = CGFloat(min(max(level, 0), 1)) }
+    func playAppear() { appearPos = 0; appearVel = 0 }
 
-    /// Voice loudness (0…1) → mouth openness while speaking.
-    func setLevel(_ level: Float) {
-        tMouth = CGFloat(min(max(level, 0), 1))
-    }
-
-    /// Kick off the bouncy entrance (call each time he's shown).
-    func playAppear() {
-        appearPos = 0
-        appearVel = 0
-    }
-
-    // MARK: - Animation loop
+    // MARK: - Loop
 
     private func startLoop() {
         let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.step() }
@@ -79,39 +63,34 @@ final class SumoView: NSView {
 
     private func step() {
         let dt: CGFloat = 1.0 / 30.0
-        bobPhase += dt * 2.2
+        bobPhase += dt * 2.0
         gesturePhase += dt * 7.0
-
-        // Ease pose parameters.
-        curSeated     += (tSeated - curSeated) * 0.16
-        curEar        += (tEar - curEar) * 0.18
-        curGesture    += (tGesture - curGesture) * 0.15
-        curEyesClosed += (tEyesClosed - curEyesClosed) * 0.25
-        curTilt       += (tTilt - curTilt) * 0.18
-        curMouth      += (tMouth - curMouth) * 0.4
-        tMouth        *= 0.90  // sag when no fresh audio arrives
-
-        // Entrance spring toward 1 with overshoot.
-        let stiffness: CGFloat = 180, damping: CGFloat = 14
-        let force = (1 - appearPos) * stiffness - appearVel * damping
+        cSquat   += (tSquat - cSquat) * 0.16
+        cEar     += (tEar - cEar) * 0.18
+        cGesture += (tGesture - cGesture) * 0.15
+        cNarrow  += (tNarrow - cNarrow) * 0.2
+        cTilt    += (tTilt - cTilt) * 0.18
+        cMouth   += (tMouth - cMouth) * 0.45
+        tMouth   *= 0.86
+        let force = (1 - appearPos) * 180 - appearVel * 14
         appearVel += force * dt
         appearPos += appearVel * dt
-
         needsDisplay = true
     }
 
-    // MARK: - Drawing
+    // MARK: - Drawing (strokes only)
 
     override func draw(_ dirtyRect: NSRect) {
         let w = bounds.width, h = bounds.height
         let u = min(w, h)
         let cx = w / 2
-        let footY = h * 0.16
+        let footY = h * 0.14
         let alpha = max(0, min(1, appearPos * 1.3))
-        let scale = 0.62 + 0.38 * appearPos           // springs slightly past 1
-        let bob = sin(bobPhase) * u * 0.012 * (1 - curSeated)
+        let scale = 0.64 + 0.36 * appearPos
+        let bob = sin(bobPhase) * u * 0.010 * (1 - cSquat)
+        let lw = u * 0.016
+        let aw = u * 0.010
 
-        // Entrance transform: scale about the feet.
         NSGraphicsContext.saveGraphicsState()
         let xf = NSAffineTransform()
         xf.translateX(by: cx, yBy: footY)
@@ -119,181 +98,183 @@ final class SumoView: NSView {
         xf.translateX(by: -cx, yBy: -footY)
         xf.concat()
 
-        let sink = curSeated * u * 0.16               // whole body lowers when meditating
-        let spread = 1 + curSeated * 0.28             // and widens at the base
+        let sink = cSquat * u * 0.14
 
-        // Ground shadow.
-        let shW = u * 0.5 * spread, shH = u * 0.07
-        fill(oval(cx - shW/2, footY - shH*0.3, shW, shH), NSColor.black.withAlphaComponent(0.16 * alpha))
+        // Ground platform ring.
+        stroke(oval(cx - u*0.34, footY - u*0.05, u*0.68, u*0.11), navy, lw*0.8, alpha)
 
-        // Legs / seated base.
-        drawLegs(cx: cx, footY: footY, u: u, seated: curSeated, alpha: alpha)
+        // Hips / body anchor.
+        let hipY = footY + u*0.16 - sink*0.2
+        let torsoBottom = hipY + u*0.02
+        let torsoW = u*0.52 * (1 + cSquat*0.12)
+        let torsoH = u*0.40
+        let torsoCX = cx
+        let torsoCY = torsoBottom + torsoH/2 - sink*0.4
 
-        // Body (belly).
-        let bellyW = u * 0.60 * spread
-        let bellyH = u * 0.46
-        let bellyBottom = footY + u * 0.09 - sink * 0.2
-        let bellyCX = cx
-        let bellyCY = bellyBottom + bellyH / 2
-        fill(oval(bellyCX - bellyW/2, bellyBottom, bellyW, bellyH), skin.withAlphaComponent(alpha))
-        // Soft belly shading.
-        fill(oval(bellyCX - bellyW*0.30, bellyBottom + bellyH*0.10, bellyW*0.34, bellyH*0.5),
-             skinShade.withAlphaComponent(0.35 * alpha))
+        // Legs (squat when thinking, stand otherwise).
+        drawLegs(cx: cx, hipY: hipY, footY: footY, u: u, squat: cSquat, lw: lw, alpha: alpha)
 
-        // Mawashi (belt).
-        let beltY = bellyBottom + bellyH * 0.06
-        let beltH = bellyH * 0.26
-        fill(roundedRect(bellyCX - bellyW*0.52, beltY, bellyW*1.04, beltH, beltH*0.35),
-             belt.withAlphaComponent(alpha))
-        fill(roundedRect(bellyCX - bellyW*0.10, beltY - beltH*0.35, bellyW*0.20, beltH*1.35, bellyW*0.05),
-             beltDark.withAlphaComponent(alpha))  // front flap
+        // Torso outline.
+        stroke(oval(torsoCX - torsoW/2, torsoBottom - sink*0.4, torsoW, torsoH), navy, lw, alpha)
+        // Accent contours (pecs + belly), the neon-linework look.
+        let pecY = torsoCY + torsoH*0.12
+        stroke(arcPath(cx: torsoCX - torsoW*0.20, cy: pecY, r: torsoW*0.16, a0: 200, a1: 340), gold, aw, alpha)
+        stroke(arcPath(cx: torsoCX + torsoW*0.20, cy: pecY, r: torsoW*0.16, a0: 200, a1: 340), gold, aw, alpha)
+        stroke(arcPath(cx: torsoCX, cy: torsoCY - torsoH*0.06, r: torsoW*0.22, a0: 205, a1: 335), orange, aw, alpha)
 
-        // Arms (behind head, gesture while speaking; rest on knees when seated).
-        let shoulderY = bellyCY + bellyH * 0.16
-        let g = curGesture
-        let swing = sin(gesturePhase) * 0.5 * g
-        let leftArmAngle:  CGFloat = 0.5 + swing + curSeated * 0.35
-        let rightArmAngle: CGFloat = -0.5 - swing - curSeated * 0.35 - curEar * 0.9
-        drawArm(shoulderX: bellyCX - bellyW*0.44, shoulderY: shoulderY, angle: leftArmAngle, u: u, alpha: alpha)
-        drawArm(shoulderX: bellyCX + bellyW*0.44, shoulderY: shoulderY, angle: rightArmAngle, u: u, alpha: alpha)
+        // Mawashi belt.
+        let beltY = torsoBottom - sink*0.4 + torsoH*0.04
+        let beltH = torsoH*0.20
+        stroke(roundedRect(torsoCX - torsoW*0.54, beltY, torsoW*1.08, beltH, beltH*0.4), navy, lw, alpha)
+        // Front flap with a gold zig-zag accent.
+        stroke(roundedRect(torsoCX - torsoW*0.10, beltY - beltH*0.55, torsoW*0.20, beltH*1.4, torsoW*0.04), navy, lw*0.8, alpha)
+        stroke(zigzag(cx: torsoCX, top: beltY - beltH*0.4, w: torsoW*0.12, h: beltH*1.1, steps: 3), gold, aw, alpha)
 
-        // Head (+ face), leaning forward when listening.
-        let headR = u * 0.165
-        let lean = curEar * u * 0.05
+        // Arms.
+        let shoulderY = torsoCY + torsoH*0.30
+        let swing = sin(gesturePhase) * 0.5 * cGesture
+        drawArm(sx: torsoCX - torsoW*0.46, sy: shoulderY, side: -1, u: u, squat: cSquat, ear: 0, gesture: swing, lw: lw, alpha: alpha, hipY: hipY, cx: cx)
+        drawArm(sx: torsoCX + torsoW*0.46, sy: shoulderY, side: 1, u: u, squat: cSquat, ear: cEar, gesture: -swing, lw: lw, alpha: alpha, hipY: hipY, cx: cx)
+
+        // Head.
+        let headR = u*0.155
+        let lean = cEar * u*0.05
         let headCX = cx + lean
-        let headCY = bellyCY + bellyH/2 + headR*0.62 - sink*0.4 + bob
-        drawHead(cx: headCX, cy: headCY, r: headR, alpha: alpha)
+        let headCY = torsoCY + torsoH/2 + headR*0.5 - sink*0.4 + bob
+        drawHead(cx: headCX, cy: headCY, r: headR, lw: lw, aw: aw, alpha: alpha)
 
         // Cupped hand at the ear when listening.
-        if curEar > 0.02 {
-            let hx = headCX + headR*1.02, hy = headCY + headR*0.05
-            fill(oval(hx - headR*0.34, hy - headR*0.34, headR*0.68, headR*0.72),
-                 skin.withAlphaComponent(alpha * curEar))
-            fill(oval(hx - headR*0.34, hy - headR*0.34, headR*0.68, headR*0.72).stroked(headR*0.10),
-                 skinShade.withAlphaComponent(0.5 * alpha * curEar))
+        if cEar > 0.02 {
+            let hx = headCX + headR*1.05, hy = headCY + headR*0.02
+            stroke(oval(hx - headR*0.30, hy - headR*0.34, headR*0.6, headR*0.72), navy, lw*0.9, alpha*cEar)
         }
 
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private func drawHead(cx: CGFloat, cy: CGFloat, r: CGFloat, alpha: CGFloat) {
+    private func drawHead(cx: CGFloat, cy: CGFloat, r: CGFloat, lw: CGFloat, aw: CGFloat, alpha: CGFloat) {
         NSGraphicsContext.saveGraphicsState()
         let xf = NSAffineTransform()
-        xf.translateX(by: cx, yBy: cy)
-        xf.rotate(byRadians: curTilt)
-        xf.concat()
+        xf.translateX(by: cx, yBy: cy); xf.rotate(byRadians: cTilt); xf.concat()
 
-        // Face.
-        fill(oval(-r, -r, r*2, r*2), skin.withAlphaComponent(alpha))
+        // Ears, face, topknot — all outlines.
+        stroke(oval(-r*1.04, -r*0.20, r*0.34, r*0.5), navy, lw*0.8, alpha)
+        stroke(oval(r*0.70, -r*0.20, r*0.34, r*0.5), navy, lw*0.8, alpha)
+        stroke(oval(-r, -r, r*2, r*2), navy, lw, alpha)
+        stroke(oval(-r*0.66, r*0.62, r*1.32, r*0.7), navy, lw*0.8, alpha)   // hairline cap
+        stroke(oval(-r*0.22, r*1.02, r*0.44, r*0.42), navy, lw*0.8, alpha)  // topknot
+        stroke(linePath(from: NSPoint(x: -r*0.22, y: r*1.16), to: NSPoint(x: r*0.22, y: r*1.16)), navy, lw*0.7, alpha)
 
-        // Topknot (chonmage): a dark cap + a little knot on top.
-        fill(oval(-r*0.9, r*0.15, r*1.8, r*0.95), hair.withAlphaComponent(alpha))
-        fill(oval(-r*0.24, r*0.78, r*0.48, r*0.5), hair.withAlphaComponent(alpha))
-        // Ears.
-        fill(oval(-r*1.06, -r*0.18, r*0.36, r*0.5), skin.withAlphaComponent(alpha))
-        fill(oval(r*0.70, -r*0.18, r*0.36, r*0.5), skin.withAlphaComponent(alpha))
+        // Angry eyebrows — thick strokes slanting down toward the nose.
+        let browY = r*0.30
+        stroke(linePath(from: NSPoint(x: -r*0.66, y: browY + r*0.10), to: NSPoint(x: -r*0.16, y: browY - r*0.10)), navy, lw*1.1, alpha)
+        stroke(linePath(from: NSPoint(x: r*0.66, y: browY + r*0.10), to: NSPoint(x: r*0.16, y: browY - r*0.10)), navy, lw*1.1, alpha)
 
-        // Eyes — open (dots) or closed (arcs) by curEyesClosed.
-        let ex = r*0.42, ey = r*0.16, eo = 1 - curEyesClosed
-        if eo > 0.05 {
-            fill(oval(-ex - r*0.12, ey - r*0.12, r*0.24, r*0.24), hair.withAlphaComponent(alpha*eo))
-            fill(oval(ex - r*0.12, ey - r*0.12, r*0.24, r*0.24), hair.withAlphaComponent(alpha*eo))
+        // Angry eyes — narrowed slits under the brows (an orange glint).
+        let eyeY = r*0.06
+        let open = (1 - cNarrow)
+        let eyeH = r*0.16 * (0.35 + 0.65*open)
+        for sgn in [-CGFloat(1), 1] {
+            let ex = sgn * r*0.40
+            stroke(linePath(from: NSPoint(x: ex - r*0.20, y: eyeY + eyeH), to: NSPoint(x: ex + r*0.20, y: eyeY + eyeH*0.2)), navy, lw*0.9, alpha)
+            stroke(linePath(from: NSPoint(x: ex - r*0.20, y: eyeY - eyeH*0.4), to: NSPoint(x: ex + r*0.20, y: eyeY - eyeH*0.4)), navy, lw*0.7, alpha)
+            stroke(linePath(from: NSPoint(x: ex - r*0.10, y: eyeY), to: NSPoint(x: ex + r*0.12, y: eyeY)), orange, aw, alpha)
         }
-        if curEyesClosed > 0.05 {
-            strokeArc(cxp: -ex, cyp: ey, r: r*0.2, alpha: alpha*curEyesClosed)
-            strokeArc(cxp: ex, cyp: ey, r: r*0.2, alpha: alpha*curEyesClosed)
-        }
 
-        // Mouth — opens with the voice while speaking; a calm line otherwise.
-        let open = curMouth * (1 - curEyesClosed)
-        let my = -r*0.42
-        if open > 0.04 {
-            let mw = r*0.5, mh = r*0.15 + r*0.7*open
-            fill(oval(-mw/2, my - mh/2, mw, mh), mouthCol.withAlphaComponent(alpha))
+        // Frown / mouth — opens with the voice while speaking; a hard frown otherwise.
+        let my = -r*0.44
+        let openM = cMouth
+        if openM > 0.05 {
+            stroke(oval(-r*0.26, my - (r*0.10 + r*0.5*openM)/2, r*0.52, r*0.10 + r*0.5*openM), navy, lw*0.9, alpha)
         } else {
-            let line = NSBezierPath()
-            line.lineWidth = r*0.09
-            line.lineCapStyle = .round
-            line.move(to: NSPoint(x: -r*0.26, y: my))
-            line.curve(to: NSPoint(x: r*0.26, y: my),
-                       controlPoint1: NSPoint(x: -r*0.05, y: my - r*0.14),
-                       controlPoint2: NSPoint(x: r*0.05, y: my - r*0.14))
-            mouthCol.withAlphaComponent(alpha).setStroke()
-            line.stroke()
+            stroke(curvePath(from: NSPoint(x: -r*0.28, y: my - r*0.06),
+                             to: NSPoint(x: r*0.28, y: my - r*0.06),
+                             c1: NSPoint(x: -r*0.08, y: my + r*0.10),
+                             c2: NSPoint(x: r*0.08, y: my + r*0.10)), navy, lw*0.9, alpha)
         }
 
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private func drawArm(shoulderX: CGFloat, shoulderY: CGFloat, angle: CGFloat, u: CGFloat, alpha: CGFloat) {
-        NSGraphicsContext.saveGraphicsState()
-        let xf = NSAffineTransform()
-        xf.translateX(by: shoulderX, yBy: shoulderY)
-        xf.rotate(byRadians: angle)
-        xf.concat()
-        let armW = u*0.16, armL = u*0.30
-        fill(roundedRect(-armW/2, -armL, armW, armL, armW/2), skin.withAlphaComponent(alpha))
-        fill(oval(-armW*0.55, -armL - armW*0.4, armW*1.1, armW*1.1), skin.withAlphaComponent(alpha)) // hand
-        NSGraphicsContext.restoreGraphicsState()
+    private func drawArm(sx: CGFloat, sy: CGFloat, side: CGFloat, u: CGFloat, squat: CGFloat,
+                         ear: CGFloat, gesture: CGFloat, lw: CGFloat, alpha: CGFloat, hipY: CGFloat, cx: CGFloat) {
+        // Hand target: at the ear (listening), on the knee (squat), or gesturing/at side.
+        let elbow = NSPoint(x: sx + side*u*0.10, y: sy - u*0.14 - gesture*u*0.10)
+        var hand: NSPoint
+        if ear > 0.5 {
+            hand = NSPoint(x: cx + side*u*0.14, y: sy + u*0.10)         // up toward the ear
+        } else if squat > 0.5 {
+            hand = NSPoint(x: cx + side*u*0.22, y: hipY - u*0.02)       // resting on the knee
+        } else {
+            hand = NSPoint(x: sx + side*u*0.06 + gesture*u*0.14, y: sy - u*0.30 + gesture*u*0.06)
+        }
+        let arm = NSBezierPath()
+        arm.move(to: NSPoint(x: sx, y: sy))
+        arm.line(to: elbow)
+        arm.line(to: hand)
+        stroke(arm, navy, lw, alpha)
+        stroke(oval(hand.x - u*0.05, hand.y - u*0.05, u*0.10, u*0.10), navy, lw*0.8, alpha)  // fist/hand
     }
 
-    private func drawLegs(cx: CGFloat, footY: CGFloat, u: CGFloat, seated: CGFloat, alpha: CGFloat) {
-        let stand = 1 - seated
-        if stand > 0.03 {
-            let legW = u*0.17, legH = u*0.14
-            fill(roundedRect(cx - u*0.20, footY - legH*0.1, legW, legH, legW*0.4), skin.withAlphaComponent(alpha*stand))
-            fill(roundedRect(cx + u*0.03, footY - legH*0.1, legW, legH, legW*0.4), skin.withAlphaComponent(alpha*stand))
-        }
-        if seated > 0.03 {
-            // Crossed-legs base: a wide low rounded mound.
-            let baseW = u*0.66, baseH = u*0.20
-            fill(roundedRect(cx - baseW/2, footY - baseH*0.2, baseW, baseH, baseH*0.5), skin.withAlphaComponent(alpha*seated))
-            fill(roundedRect(cx - baseW*0.30, footY + baseH*0.15, baseW*0.60, baseH*0.5, baseH*0.25),
-                 skinShade.withAlphaComponent(0.4*alpha*seated))  // fold shading
+    private func drawLegs(cx: CGFloat, hipY: CGFloat, footY: CGFloat, u: CGFloat, squat: CGFloat, lw: CGFloat, alpha: CGFloat) {
+        for sgn in [-CGFloat(1), 1] {
+            let hip = NSPoint(x: cx + sgn*u*0.12, y: hipY)
+            let knee = NSPoint(x: cx + sgn*(u*0.14 + squat*u*0.16), y: hipY - u*0.10 + squat*u*0.05)
+            let foot = NSPoint(x: cx + sgn*(u*0.10 + squat*u*0.04), y: footY)
+            let leg = NSBezierPath()
+            leg.move(to: hip); leg.line(to: knee); leg.line(to: foot)
+            stroke(leg, navy, lw, alpha)
+            stroke(oval(foot.x - u*0.07, footY - u*0.02, u*0.14, u*0.05), navy, lw*0.8, alpha)  // foot
         }
     }
 
-    // MARK: - Shape helpers
+    // MARK: - Stroke helpers
 
-    private func fill(_ path: NSBezierPath, _ color: NSColor) { color.setFill(); path.fill() }
+    private func stroke(_ path: NSBezierPath, _ color: NSColor, _ width: CGFloat, _ alpha: CGFloat) {
+        color.withAlphaComponent(alpha).setStroke()
+        path.lineWidth = width
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        path.stroke()
+    }
     private func oval(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> NSBezierPath {
         NSBezierPath(ovalIn: NSRect(x: x, y: y, width: w, height: h))
     }
     private func roundedRect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ r: CGFloat) -> NSBezierPath {
         NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h), xRadius: r, yRadius: r)
     }
-    private func strokeArc(cxp: CGFloat, cyp: CGFloat, r: CGFloat, alpha: CGFloat) {
+    private func linePath(from a: NSPoint, to b: NSPoint) -> NSBezierPath {
+        let p = NSBezierPath(); p.move(to: a); p.line(to: b); return p
+    }
+    private func curvePath(from a: NSPoint, to b: NSPoint, c1: NSPoint, c2: NSPoint) -> NSBezierPath {
+        let p = NSBezierPath(); p.move(to: a); p.curve(to: b, controlPoint1: c1, controlPoint2: c2); return p
+    }
+    private func arcPath(cx: CGFloat, cy: CGFloat, r: CGFloat, a0: CGFloat, a1: CGFloat) -> NSBezierPath {
+        let p = NSBezierPath(); p.appendArc(withCenter: NSPoint(x: cx, y: cy), radius: r, startAngle: a0, endAngle: a1); return p
+    }
+    private func zigzag(cx: CGFloat, top: CGFloat, w: CGFloat, h: CGFloat, steps: Int) -> NSBezierPath {
         let p = NSBezierPath()
-        p.lineWidth = r*0.28
-        p.lineCapStyle = .round
-        p.appendArc(withCenter: NSPoint(x: cxp, y: cyp), radius: r, startAngle: 200, endAngle: 340)
-        hair.withAlphaComponent(alpha).setStroke()
-        p.stroke()
+        p.move(to: NSPoint(x: cx - w/2, y: top))
+        let dy = h / CGFloat(steps)
+        for i in 0..<steps {
+            let y = top - dy*CGFloat(i) - dy/2
+            p.line(to: NSPoint(x: cx + (i % 2 == 0 ? w/2 : -w/2), y: y))
+        }
+        return p
     }
 }
 
-private extension NSBezierPath {
-    /// A thin ring version of this path's bounds (used for a simple hand outline).
-    func stroked(_ width: CGFloat) -> NSBezierPath {
-        let r = bounds
-        let outer = NSBezierPath(ovalIn: r)
-        let inner = NSBezierPath(ovalIn: r.insetBy(dx: width, dy: width))
-        outer.append(inner.reversed)
-        return outer
-    }
-}
-
-/// A Siri-style floating window — now with a transparent background so Sumo simply appears on the
-/// desktop (no boxy panel). Floats above everything, never takes focus, passes clicks through.
+/// A Siri-style floating window — transparent background so Sumo simply appears on the desktop.
+/// Floats above everything, never takes focus, passes clicks through.
 final class HUDWindowController {
     private let panel: NSPanel
-    private let sumo = SumoView(frame: NSRect(x: 0, y: 0, width: 150, height: 150))
+    private let sumo = SumoView(frame: NSRect(x: 0, y: 0, width: 160, height: 160))
     private let statusLabel = NSTextField(labelWithString: "")
     private let messageLabel: NSTextField
     private var pendingHide: DispatchWorkItem?
 
     init() {
-        let size = NSSize(width: 360, height: 250)
+        let size = NSSize(width: 380, height: 260)
         panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -304,16 +285,13 @@ final class HUDWindowController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        panel.isMovableByWindowBackground = false
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.alphaValue = 0
 
-        // Plain transparent container — no blurred box.
         let container = NSView(frame: NSRect(origin: .zero, size: size))
         container.autoresizingMask = [.width, .height]
 
-        // Legible over any wallpaper: white text with a soft dark shadow.
         let textShadow = NSShadow()
         textShadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
         textShadow.shadowBlurRadius = 5
@@ -345,8 +323,8 @@ final class HUDWindowController {
         container.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            sumo.widthAnchor.constraint(equalToConstant: 150),
-            sumo.heightAnchor.constraint(equalToConstant: 150),
+            sumo.widthAnchor.constraint(equalToConstant: 160),
+            sumo.heightAnchor.constraint(equalToConstant: 160),
             stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 16),
@@ -356,35 +334,23 @@ final class HUDWindowController {
         panel.contentView = container
     }
 
-    // MARK: - State transitions (call on the main thread)
-
-    func showListening() {
-        present(status: "Listening…", message: "", pose: .listening)
-    }
-
+    func showListening() { present(status: "Listening…", message: "", pose: .listening) }
     func showThinking(_ command: String) {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        present(status: "Working on it…", message: trimmed.isEmpty ? "" : "“\(trimmed)”", pose: .thinking)
+        let t = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        present(status: "Working on it…", message: t.isEmpty ? "" : "“\(t)”", pose: .thinking)
     }
-
     func showSpeaking(_ reply: String) {
         present(status: "Sumo", message: reply.trimmingCharacters(in: .whitespacesAndNewlines), pose: .speaking)
     }
-
-    /// Live loudness (0…1) → Sumo's mouth.
-    func setLevel(_ level: Float) {
-        sumo.setLevel(level)
-    }
+    func setLevel(_ level: Float) { sumo.setLevel(level) }
 
     private func present(status: String, message: String, pose: SumoView.Pose) {
-        pendingHide?.cancel()
-        pendingHide = nil
+        pendingHide?.cancel(); pendingHide = nil
         statusLabel.stringValue = status
         messageLabel.stringValue = message
         messageLabel.isHidden = message.isEmpty
         sumo.setPose(pose)
-        let wasHidden = panel.alphaValue < 0.5
-        if wasHidden { sumo.playAppear() }   // bounce in only when first appearing
+        if panel.alphaValue < 0.5 { sumo.playAppear() }
         positionPanel()
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in
@@ -413,9 +379,7 @@ final class HUDWindowController {
         guard let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
         let s = panel.frame.size
-        let x = visible.midX - s.width / 2
-        let y = visible.minY + 120
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        panel.setFrameOrigin(NSPoint(x: visible.midX - s.width / 2, y: visible.minY + 120))
     }
 }
 
@@ -426,12 +390,9 @@ enum JarvisIcon {
         let image = NSImage(size: size, flipped: false) { rect in
             NSColor.black.setFill()
             let w = rect.width, h = rect.height, cx = rect.midX
-            // Body.
-            NSBezierPath(ovalIn: NSRect(x: cx - w*0.34, y: h*0.10, width: w*0.68, height: h*0.55)).fill()
-            // Head.
-            NSBezierPath(ovalIn: NSRect(x: cx - w*0.20, y: h*0.52, width: w*0.40, height: h*0.40)).fill()
-            // Topknot.
-            NSBezierPath(ovalIn: NSRect(x: cx - w*0.07, y: h*0.84, width: w*0.14, height: h*0.13)).fill()
+            NSBezierPath(ovalIn: NSRect(x: cx - w*0.34, y: h*0.10, width: w*0.68, height: h*0.52)).fill()
+            NSBezierPath(ovalIn: NSRect(x: cx - w*0.19, y: h*0.50, width: w*0.38, height: h*0.38)).fill()
+            NSBezierPath(ovalIn: NSRect(x: cx - w*0.07, y: h*0.82, width: w*0.14, height: h*0.13)).fill()
             return true
         }
         image.isTemplate = true
