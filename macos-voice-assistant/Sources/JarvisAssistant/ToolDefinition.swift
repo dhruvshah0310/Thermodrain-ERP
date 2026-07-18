@@ -344,6 +344,80 @@ enum JarvisTools {
             ))
         }
 
+        if config.allowFullFileAccess {
+            tools.append(ToolDefinition(
+                name: "read_any_file",
+                description: """
+                Read a text file from anywhere on the Mac. Give an absolute path; a leading ~ is \
+                expanded to the home folder (e.g. ~/Documents/notes.txt, /Users/you/Desktop/x.md).
+                """,
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["path": ["type": "string", "description": "Absolute or ~-relative path to the file"]],
+                    "required": ["path"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "write_any_file",
+                description: """
+                Write or overwrite a text file anywhere on the Mac (creating parent folders as \
+                needed). Absolute or ~-relative path. Overwrites without warning, so double-check \
+                the path.
+                """,
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "path": ["type": "string", "description": "Absolute or ~-relative destination path"],
+                        "content": ["type": "string", "description": "Full text contents to write"]
+                    ],
+                    "required": ["path", "content"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "list_directory",
+                description: "List the contents of a folder anywhere on the Mac (names only, with a trailing / on subfolders). Absolute or ~-relative path.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["path": ["type": "string", "description": "Absolute or ~-relative folder path"]],
+                    "required": ["path"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "move_path",
+                description: "Move or rename a file or folder anywhere on the Mac. Both source and destination are absolute or ~-relative paths.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "source": ["type": "string", "description": "Existing file/folder to move"],
+                        "destination": ["type": "string", "description": "New path (its parent folders are created if missing)"]
+                    ],
+                    "required": ["source", "destination"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "delete_path",
+                description: """
+                Delete a file or folder anywhere on the Mac (permanently — not to the Trash). \
+                Critical system and home-root paths are refused as a safety net. Be sure before \
+                calling this; confirm with the user first if there's any doubt.
+                """,
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["path": ["type": "string", "description": "Absolute or ~-relative path to delete"]],
+                    "required": ["path"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "open_path",
+                description: "Open a file, folder, or app at a path in its default application (like double-clicking it in Finder). Absolute or ~-relative path.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["path": ["type": "string", "description": "Absolute or ~-relative path to open"]],
+                    "required": ["path"]
+                ]
+            ))
+        }
+
         if config.allowShellCommands {
             tools.append(ToolDefinition(
                 name: "run_shell_command",

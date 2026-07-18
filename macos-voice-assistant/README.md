@@ -75,7 +75,8 @@ permanent location to point at:
 | `allowAppleScript` | On by default. Lets Claude control Mac apps/system settings via AppleScript. |
 | `allowOpenApps` | On by default. Lets Claude open apps and URLs. |
 | `allowFileAccess` | On by default. Lets Claude read/write files, scoped to `workspaceDirectory`. |
-| `workspaceDirectory` | Folder Claude's file tools are confined to. |
+| `allowFullFileAccess` | Off by default. Lets Claude read/write/move/delete/list/open files **anywhere** on the Mac (not just the workspace), via `read_any_file`, `write_any_file`, `list_directory`, `move_path`, `delete_path`, `open_path`. Deletes refuse a denylist of critical system/home paths. Also has a menu toggle. |
+| `workspaceDirectory` | Folder Claude's workspace file tools are confined to. |
 | `maxToolIterations` | Cap on tool-call round-trips per spoken command, so a confused loop can't run forever. |
 | `launchAtLogin` | Mirrors the menu bar toggle; installs/removes a LaunchAgent. |
 | `silenceTimeout` | Seconds of silence (once you've started speaking) before a command is finalized. Raise it if you get cut off between words. |
@@ -87,6 +88,8 @@ permanent location to point at:
 | `speechLocale` | Speech-recognition locale. `"en-IN"` (default) understands Indian-accented English best; `"en-US"`, `"en-GB"`, etc. also work. Falls back automatically if unsupported. |
 | `allowWebSearch` | On by default. Lets Claude search the web (Anthropic's hosted web-search tool) before answering. Needs a recent model — the default `claude-sonnet-5` supports it. |
 | `allowScreenControl` | On by default. Lets Jarvis take screenshots (see the screen) and control the mouse (click/scroll) — true "computer use." Needs Screen Recording + Accessibility permissions. |
+| `conversationMemoryTimeout` | Seconds of idle before Jarvis forgets the running conversation (default 180). The last ~6 turns are kept so follow-ups like "reply to him" / "open it" have context; after this gap the next command starts fresh. |
+| `verifyActions` | On by default. After blind keystroke actions (typing, key presses, pasting), nudges Claude to screenshot and confirm the effect before claiming success. Needs `allowScreenControl` to be useful. |
 
 Restart the app after hand-editing the config file. `conversationMode`, `greetOnLaunch`, and the
 allow-flags also have menu bar toggles.

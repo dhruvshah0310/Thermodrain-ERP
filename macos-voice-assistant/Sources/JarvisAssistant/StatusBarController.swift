@@ -114,6 +114,11 @@ final class StatusBarController {
         screenItem.state = assistant.config.allowScreenControl ? .on : .off
         menu.addItem(screenItem)
 
+        let fullFileItem = NSMenuItem(title: "Allow Full File Access (whole Mac)", action: #selector(toggleFullFileAccess), keyEquivalent: "")
+        fullFileItem.target = self
+        fullFileItem.state = assistant.config.allowFullFileAccess ? .on : .off
+        menu.addItem(fullFileItem)
+
         let shellItem = NSMenuItem(title: "Allow Shell Commands", action: #selector(toggleShell), keyEquivalent: "")
         shellItem.target = self
         shellItem.state = assistant.config.allowShellCommands ? .on : .off
@@ -239,6 +244,12 @@ final class StatusBarController {
 
     @objc private func toggleScreenControl() {
         assistant.config.allowScreenControl.toggle()
+        assistant.config.save()
+        buildMenu()
+    }
+
+    @objc private func toggleFullFileAccess() {
+        assistant.config.allowFullFileAccess.toggle()
         assistant.config.save()
         buildMenu()
     }

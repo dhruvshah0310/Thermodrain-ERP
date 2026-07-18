@@ -7,8 +7,14 @@ final class JarvisController {
     private var apiKey: String?
     private let speechEngine: SpeechEngine
     private let speechOutput = SpeechOutput()
-    private let executor: ToolExecutor
     private var statusBar: StatusBarController!
+
+    // Rolling conversation memory: the last few plain-text user/assistant turns, so follow-up
+    // commands ("reply to him", "open it", "what about tomorrow?") carry context. Kept text-only
+    // (no tool_use/tool_result blocks) to stay small, and cleared after a long idle gap.
+    private var conversationHistory: [[String: Any]] = []
+    private var lastCommandAt: Date?
+    private static let maxHistoryTurns = 6  // 6 user+assistant pairs = 12 messages
 
     private static let systemPrompt = """
     You are Jarvis, a voice assistant running on the user's Mac. You were just given a command \
@@ -22,9 +28,15 @@ final class JarvisController {
     You can control the Mac through these tools: open_application, open_url, run_applescript, \
     type_text, press_key, paste_text, wait, screenshot + mouse (click/scroll) for visual control, \
     clipboard read/write, screen context, system controls (volume, mute, brightness, lock, sleep), \
-    dedicated app tools (Music, Reminders, Notes, Messages/iMessage, Calendar), and file tools \
-    scoped to a workspace folder. Prefer the dedicated/system tools when they fit; fall back to \
-    run_applescript or screenshot+click for anything else. Guidance for common tasks:
+    dedicated app tools (Music, Reminders, Notes, Messages/iMessage, Calendar), and file tools. \
+    Prefer the dedicated/system tools when they fit; fall back to run_applescript or \
+    screenshot+click for anything else. Guidance for common tasks:
+
+    • Files: if the workspace file tools (read_file/write_file/list_workspace_files) are available, \
+    use them for scratch notes. If the full-disk file tools (read_any_file, write_any_file, \
+    list_directory, move_path, delete_path, open_path) are available, you can work with files \
+    anywhere on the Mac — use absolute or ~-relative paths. Be careful with delete_path (it's \
+    permanent, not the Trash); confirm first if a deletion isn't clearly what the user asked for.
 
     • WhatsApp by phone number (fewest steps, prefer this when you have a number): open the URL \
     https://wa.me/<number>?text=<url-encoded message> (full international format, no + or spaces, \
@@ -69,6 +81,16 @@ final class JarvisController {
     prefer paste_text over type_text — it's more reliable. Pass app:"<AppName>" so it lands in \
     the right place.
 
+    • Verifying your work: UI actions driven by keystrokes or clicks (type_text, press_key, \
+    paste_text, click) are blind — you're dispatching input and can't tell from the tool result \
+    whether it actually landed. When the outcome matters (a message sent, a form filled, a button \
+    pressed), take a screenshot afterward to confirm, and retry if it didn't work. Accuracy over \
+    speed. Only claim success for things a tool result truly confirms.
+
+    You may be given a few recent turns of our conversation as context. Use them to resolve \
+    follow-ups that refer back ("reply to him", "open that", "what about tomorrow?") — but if a new \
+    command clearly starts a fresh topic, don't force a connection to the old one.
+
     Work autonomously and thoroughly, like a capable assistant: research when useful, then do the \
     whole task in one go with several tool calls, and finish with a brief spoken confirmation of \
     what you did. Don't ask for permission on reversible actions that clearly follow from the \
@@ -84,7 +106,6 @@ final class JarvisController {
             followUpWindow: config.followUpWindow,
             localeIdentifier: config.speechLocale
         )
-        executor = ToolExecutor(config: config)
         try? FileManager.default.createDirectory(at: config.workspaceURL, withIntermediateDirectories: true)
         apiKey = Self.resolveAPIKey()
     }
@@ -203,6 +224,18 @@ final class JarvisController {
         }
     }
 
+    /// Append the just-finished exchange to conversation memory, trimming to the last few turns.
+    /// An empty reply (e.g. an error path) isn't stored so it can't poison later context.
+    private func recordTurn(command: String, reply: String) {
+        guard !reply.isEmpty else { return }
+        conversationHistory.append(["role": "user", "content": command])
+        conversationHistory.append(["role": "assistant", "content": reply])
+        let maxMessages = Self.maxHistoryTurns * 2
+        if conversationHistory.count > maxMessages {
+            conversationHistory.removeFirst(conversationHistory.count - maxMessages)
+        }
+    }
+
     private func requestPermissions(completion: @escaping (Bool) -> Void) {
         SFSpeechRecognizer.requestAuthorization { speechStatus in
             AVCaptureDevice.requestAccess(for: .audio) { micGranted in
@@ -225,9 +258,20 @@ final class JarvisController {
         Logger.shared.log("Command: \(command)")
         statusBar.setState(.thinking)
 
+        // Drop stale context: if it's been a while since the last command, start fresh so an
+        // unrelated command doesn't inherit an old conversation's context.
+        if let last = lastCommandAt, Date().timeIntervalSince(last) > config.conversationMemoryTimeout {
+            conversationHistory.removeAll()
+        }
+        lastCommandAt = Date()
+        let history = conversationHistory
+
         let client = ClaudeClient(apiKey: apiKey, model: config.model, maxIterations: config.maxToolIterations)
         let tools = JarvisTools.allTools(config: config)
         let serverTools = JarvisTools.serverTools(config: config)
+        // Build the executor from the live config each command so menu toggles (screen control,
+        // full file access, shell) take effect immediately, not just on relaunch.
+        let executor = ToolExecutor(config: config)
 
         Task {
             do {
@@ -236,10 +280,14 @@ final class JarvisController {
                     systemPrompt: Self.systemPrompt,
                     tools: tools,
                     serverTools: serverTools,
-                    executor: executor
+                    executor: executor,
+                    history: history
                 )
                 Logger.shared.log("Reply: \(reply)")
-                await MainActor.run { self.speak(reply) }
+                await MainActor.run {
+                    self.recordTurn(command: command, reply: reply)
+                    self.speak(reply)
+                }
             } catch {
                 Logger.shared.log("Claude error: \(error.localizedDescription)")
                 await MainActor.run {

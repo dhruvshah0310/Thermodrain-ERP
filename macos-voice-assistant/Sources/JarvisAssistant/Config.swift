@@ -9,6 +9,10 @@ struct Config: Codable {
     var allowAppleScript: Bool
     var allowOpenApps: Bool
     var allowFileAccess: Bool
+    // Let Claude read/write/move/delete files ANYWHERE on the Mac (tilde-expanded absolute paths),
+    // not just the sandboxed workspace folder. Off by default — this is a powerful capability, so
+    // it's opt-in. Deletes still go through a denylist of critical system/home paths as a safety net.
+    var allowFullFileAccess: Bool
     var workspaceDirectory: String
     var maxToolIterations: Int
     var launchAtLogin: Bool
@@ -36,6 +40,13 @@ struct Config: Codable {
     // Let Claude see the screen (screenshots) and control the mouse — true "computer use" so it
     // can operate any app visually, like a person. Needs Accessibility + Screen Recording perms.
     var allowScreenControl: Bool
+    // Seconds of idle silence after which Jarvis forgets the running conversation and treats the
+    // next command as a fresh start. Keeps short back-and-forths ("reply to him", "open it")
+    // context-aware while not carrying stale context into an unrelated command hours later.
+    var conversationMemoryTimeout: Double
+    // After UI actions (typing, clicking, sending a message), nudge Claude to screenshot and
+    // confirm the effect before reporting success — accuracy over speed. Needs allowScreenControl.
+    var verifyActions: Bool
 
     static let `default` = Config(
         // Claude Code's internal short model names (e.g. "claude-sonnet-5") don't always match the
@@ -50,6 +61,7 @@ struct Config: Codable {
         allowAppleScript: true,
         allowOpenApps: true,
         allowFileAccess: true,
+        allowFullFileAccess: false,
         workspaceDirectory: "~/JarvisAssistant/workspace",
         maxToolIterations: 16,
         launchAtLogin: false,
@@ -61,7 +73,9 @@ struct Config: Codable {
         userName: nil,
         speechLocale: "en-IN",
         allowWebSearch: true,
-        allowScreenControl: true
+        allowScreenControl: true,
+        conversationMemoryTimeout: 180,
+        verifyActions: true
     )
 
     // Resilient decoding: any key missing from an older config.json falls back to the default,
@@ -77,6 +91,7 @@ struct Config: Codable {
         allowAppleScript = try c.decodeIfPresent(Bool.self, forKey: .allowAppleScript) ?? d.allowAppleScript
         allowOpenApps = try c.decodeIfPresent(Bool.self, forKey: .allowOpenApps) ?? d.allowOpenApps
         allowFileAccess = try c.decodeIfPresent(Bool.self, forKey: .allowFileAccess) ?? d.allowFileAccess
+        allowFullFileAccess = try c.decodeIfPresent(Bool.self, forKey: .allowFullFileAccess) ?? d.allowFullFileAccess
         workspaceDirectory = try c.decodeIfPresent(String.self, forKey: .workspaceDirectory) ?? d.workspaceDirectory
         maxToolIterations = try c.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? d.maxToolIterations
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
@@ -89,15 +104,19 @@ struct Config: Codable {
         speechLocale = try c.decodeIfPresent(String.self, forKey: .speechLocale) ?? d.speechLocale
         allowWebSearch = try c.decodeIfPresent(Bool.self, forKey: .allowWebSearch) ?? d.allowWebSearch
         allowScreenControl = try c.decodeIfPresent(Bool.self, forKey: .allowScreenControl) ?? d.allowScreenControl
+        conversationMemoryTimeout = try c.decodeIfPresent(Double.self, forKey: .conversationMemoryTimeout) ?? d.conversationMemoryTimeout
+        verifyActions = try c.decodeIfPresent(Bool.self, forKey: .verifyActions) ?? d.verifyActions
     }
 
     private init(
         model: String, wakeWord: String, voiceIdentifier: String?, speechRate: Float,
         allowShellCommands: Bool, allowAppleScript: Bool, allowOpenApps: Bool, allowFileAccess: Bool,
+        allowFullFileAccess: Bool,
         workspaceDirectory: String, maxToolIterations: Int, launchAtLogin: Bool,
         silenceTimeout: Double, commandStartTimeout: Double,
         conversationMode: Bool, followUpWindow: Double, greetOnLaunch: Bool, userName: String?,
-        speechLocale: String, allowWebSearch: Bool, allowScreenControl: Bool
+        speechLocale: String, allowWebSearch: Bool, allowScreenControl: Bool,
+        conversationMemoryTimeout: Double, verifyActions: Bool
     ) {
         self.model = model
         self.wakeWord = wakeWord
@@ -107,6 +126,7 @@ struct Config: Codable {
         self.allowAppleScript = allowAppleScript
         self.allowOpenApps = allowOpenApps
         self.allowFileAccess = allowFileAccess
+        self.allowFullFileAccess = allowFullFileAccess
         self.workspaceDirectory = workspaceDirectory
         self.maxToolIterations = maxToolIterations
         self.launchAtLogin = launchAtLogin
@@ -119,6 +139,8 @@ struct Config: Codable {
         self.speechLocale = speechLocale
         self.allowWebSearch = allowWebSearch
         self.allowScreenControl = allowScreenControl
+        self.conversationMemoryTimeout = conversationMemoryTimeout
+        self.verifyActions = verifyActions
     }
 
     var workspaceURL: URL {

@@ -6,27 +6,16 @@ does everything on the Mac a human can, accuracy over speed. Items get checked o
 
 ## In progress / next
 
-- [ ] **Full file access mode** (config-gated) — read/write/move/delete/list anywhere on disk.
-- [ ] **Conversation memory** — retain the last several turns across commands.
-- [ ] **Verify-after-action** — screenshot to confirm a UI action worked; retry or report honestly.
+- [ ] **Persistent memory file** — a notes file Jarvis reads at start and writes learnings to, so
+      it remembers facts/preferences across sessions (builds on the in-session conversation memory).
+- [ ] **Barge-in** — let the user interrupt Jarvis mid-reply by speaking.
+- [ ] **Better errors spoken aloud** — surface API/tool errors as short spoken messages.
 
 ## Backlog (rough priority)
 
-- [ ] **Clipboard read/write tools** — `read_clipboard`, `set_clipboard`.
-- [ ] **System control tools** — volume, brightness, mute, Do Not Disturb, sleep/lock, wifi
-      toggle, media play/pause, screenshot-to-file.
-- [ ] **Full file access mode** (config-gated, off by default) — read/write/move/delete files
-      anywhere, list directories, open files — so Jarvis can manage the whole disk like a human.
-      Keep the destructive-pattern denylist as an accident net.
-- [ ] **Dedicated app tools** — Calendar (create/list events), Reminders (add/list), Notes
-      (create), Mail (send/search), Messages (send iMessage), Music (play/pause/skip), Finder.
-- [ ] **Conversation memory** — retain the last several turns across commands so follow-ups have
-      context ("open it", "reply to him").
-- [ ] **Persistent memory file** — a notes file Jarvis reads at start and writes learnings to, so
-      it remembers facts/preferences across sessions.
-- [ ] **Verify-after-action** — after a UI action, screenshot and confirm it worked; retry or
-      report honestly if not.
-- [ ] **Barge-in** — let the user interrupt Jarvis mid-reply by speaking.
+- [ ] **Dedicated app tools (more)** — Calendar (list events), Reminders (list), Mail (send/search),
+      Finder operations beyond open_path.
+- [ ] **Answer length control** — keep spoken answers concise unless asked to elaborate.
 - [ ] **Better errors spoken aloud** — surface API/tool errors as short spoken messages.
 - [ ] **Answer length control** — keep spoken answers concise unless asked to elaborate.
 - [ ] **Web search result citations** — optionally speak the source when it searched.
@@ -34,6 +23,17 @@ does everything on the Mac a human can, accuracy over speed. Items get checked o
 
 ## Done
 
+- [x] **Full file access mode** (config-gated, off by default) — `read_any_file`, `write_any_file`,
+      `list_directory`, `move_path`, `delete_path`, `open_path` work anywhere on disk (tilde-expanded
+      absolute paths). Deletes are refused for a denylist of critical system/home paths as an
+      accident net. Gated by `allowFullFileAccess` (+ menu toggle); auto-appears in the MCP server.
+- [x] **Conversation memory** — the controller keeps the last ~6 plain-text user/assistant turns and
+      passes them to `ClaudeClient.converse`, so follow-ups ("reply to him", "open it") have context.
+      Cleared after `conversationMemoryTimeout` seconds of idle so stale context doesn't leak into an
+      unrelated command.
+- [x] **Verify-after-action** — blind keystroke tools (`type_text`, `press_key`, `paste_text`) append
+      a nudge to screenshot and confirm before claiming success (gated by `verifyActions` +
+      `allowScreenControl`), reinforced in the system prompt.
 - [x] **Screen vision (computer use)** — `screenshot` tool captures the main display, downscales to
       logical points, returns it as a base64 PNG in the tool result so Claude can see it.
 - [x] **Mouse control** — `click`, `double_click`, `right_click`, `move_mouse`, `scroll` via

@@ -185,6 +185,36 @@ actor ToolExecutor {
             return writeWorkspaceFile(path, content: content)
         case "list_workspace_files":
             return listWorkspaceFiles()
+        case "read_any_file":
+            guard config.allowFullFileAccess, let path = input["path"] as? String else {
+                return "error: full file access disabled or missing path"
+            }
+            return readAnyFile(path)
+        case "write_any_file":
+            guard config.allowFullFileAccess, let path = input["path"] as? String, let content = input["content"] as? String else {
+                return "error: full file access disabled or missing path/content"
+            }
+            return writeAnyFile(path, content: content)
+        case "list_directory":
+            guard config.allowFullFileAccess, let path = input["path"] as? String else {
+                return "error: full file access disabled or missing path"
+            }
+            return listDirectory(path)
+        case "move_path":
+            guard config.allowFullFileAccess, let source = input["source"] as? String, let destination = input["destination"] as? String else {
+                return "error: full file access disabled or missing source/destination"
+            }
+            return movePath(source, destination: destination)
+        case "delete_path":
+            guard config.allowFullFileAccess, let path = input["path"] as? String else {
+                return "error: full file access disabled or missing path"
+            }
+            return deletePath(path)
+        case "open_path":
+            guard config.allowFullFileAccess, let path = input["path"] as? String else {
+                return "error: full file access disabled or missing path"
+            }
+            return openPath(path)
         case "run_shell_command":
             guard config.allowShellCommands, let command = input["command"] as? String else {
                 return "error: shell commands disabled or missing command"
@@ -497,13 +527,22 @@ actor ToolExecutor {
         result + " (if this didn't work, Jarvis likely needs Accessibility permission: System Settings > Privacy & Security > Accessibility — add and enable JarvisAssistant)"
     }
 
+    /// Blind keystroke tools can't see whether their input landed. When verifyActions is on and screen
+    /// control is available, nudge Claude to screenshot and confirm before reporting success (and
+    /// retry if it didn't take) — accuracy over speed. No-op otherwise, so it never adds noise when
+    /// Claude can't actually see the screen.
+    private func verifyHint() -> String {
+        guard config.verifyActions, config.allowScreenControl else { return "" }
+        return " Take a screenshot to confirm this landed correctly before reporting success, and retry if it didn't."
+    }
+
     private func typeText(_ text: String, app: String?) -> String {
         let result = runAppleScript(systemEventsScript(action: "keystroke \(appleScriptLiteral(text))", app: app))
         if result.hasPrefix("applescript error") {
             return accessibilityHint(result)
         }
         // We can only confirm the keystrokes were dispatched, not that they landed correctly.
-        return "dispatched typing of \(text.count) characters (not verified visually)"
+        return "dispatched typing of \(text.count) characters (not verified visually)." + verifyHint()
     }
 
     private func pasteText(_ text: String, app: String?) -> String {
@@ -515,7 +554,7 @@ actor ToolExecutor {
         if result.hasPrefix("applescript error") {
             return accessibilityHint(result)
         }
-        return "pasted \(text.count) characters (not verified visually)"
+        return "pasted \(text.count) characters (not verified visually)." + verifyHint()
     }
 
     private func pressKey(_ key: String, modifiers: [String], app: String?) -> String {
@@ -541,7 +580,7 @@ actor ToolExecutor {
         if result.hasPrefix("applescript error") {
             return accessibilityHint(result)
         }
-        return "dispatched key \(key) (not verified visually)"
+        return "dispatched key \(key) (not verified visually)." + verifyHint()
     }
 
     private func workspaceURL(for relativePath: String) -> URL? {
@@ -577,6 +616,114 @@ actor ToolExecutor {
             return "(empty)"
         }
         return items.joined(separator: "\n")
+    }
+
+    // MARK: - Full-disk file access (gated by config.allowFullFileAccess)
+
+    /// Paths that delete_path refuses outright, as a safety net (not a security boundary). Covers the
+    /// filesystem root, key system trees, and the user's home root and its top-level Library folders —
+    /// deleting any of these would be catastrophic and is never a legitimate voice command.
+    private static let protectedDeletePaths: Set<String> = {
+        let home = NSHomeDirectory()
+        var paths: Set<String> = [
+            "/", "/System", "/Library", "/Applications", "/usr", "/bin", "/sbin",
+            "/etc", "/var", "/private", "/Users", "/opt", "/cores", "/Volumes",
+            home, home + "/Library"
+        ]
+        return paths
+    }()
+
+    /// Expand a leading ~ and standardize an absolute path. Returns nil for empty input.
+    private func absolutePath(_ path: String) -> String? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return (trimmed as NSString).expandingTildeInPath
+    }
+
+    private func readAnyFile(_ path: String) -> String {
+        guard let full = absolutePath(path) else { return "error: empty path" }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: full, isDirectory: &isDir) else {
+            return "error: no such file: \(full)"
+        }
+        if isDir.boolValue { return "error: \(full) is a folder — use list_directory instead" }
+        do {
+            return try String(contentsOfFile: full, encoding: .utf8)
+        } catch {
+            return "error: \(error.localizedDescription) (the file may be binary or not UTF-8 text)"
+        }
+    }
+
+    private func writeAnyFile(_ path: String, content: String) -> String {
+        guard let full = absolutePath(path) else { return "error: empty path" }
+        let url = URL(fileURLWithPath: full)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            return "wrote \(content.count) characters to \(full)"
+        } catch {
+            return "error: \(error.localizedDescription)"
+        }
+    }
+
+    private func listDirectory(_ path: String) -> String {
+        guard let full = absolutePath(path) else { return "error: empty path" }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: full, isDirectory: &isDir) else {
+            return "error: no such folder: \(full)"
+        }
+        guard isDir.boolValue else { return "error: \(full) is a file, not a folder" }
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: full) else {
+            return "error: could not read \(full) (permission may be denied)"
+        }
+        if items.isEmpty { return "(empty folder)" }
+        // Append a trailing / to subfolders so Claude can tell files from folders.
+        let listed = items.sorted().map { name -> String in
+            var childIsDir: ObjCBool = false
+            let childPath = (full as NSString).appendingPathComponent(name)
+            FileManager.default.fileExists(atPath: childPath, isDirectory: &childIsDir)
+            return childIsDir.boolValue ? name + "/" : name
+        }
+        return listed.joined(separator: "\n")
+    }
+
+    private func movePath(_ source: String, destination: String) -> String {
+        guard let src = absolutePath(source) else { return "error: empty source path" }
+        guard let dst = absolutePath(destination) else { return "error: empty destination path" }
+        guard FileManager.default.fileExists(atPath: src) else { return "error: no such source: \(src)" }
+        let dstURL = URL(fileURLWithPath: dst)
+        do {
+            try FileManager.default.createDirectory(at: dstURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: dst) {
+                try FileManager.default.removeItem(atPath: dst)
+            }
+            try FileManager.default.moveItem(atPath: src, toPath: dst)
+            return "moved \(src) → \(dst)"
+        } catch {
+            return "error: \(error.localizedDescription)"
+        }
+    }
+
+    private func deletePath(_ path: String) -> String {
+        guard let full = absolutePath(path) else { return "error: empty path" }
+        let standardized = URL(fileURLWithPath: full).standardizedFileURL.path
+        if Self.protectedDeletePaths.contains(standardized) {
+            return "blocked: refusing to delete a protected system/home path (\(standardized))"
+        }
+        guard FileManager.default.fileExists(atPath: full) else { return "error: no such path: \(full)" }
+        do {
+            try FileManager.default.removeItem(atPath: full)
+            return "deleted \(full)"
+        } catch {
+            return "error: \(error.localizedDescription)"
+        }
+    }
+
+    private func openPath(_ path: String) -> String {
+        guard let full = absolutePath(path) else { return "error: empty path" }
+        guard FileManager.default.fileExists(atPath: full) else { return "error: no such path: \(full)" }
+        NSWorkspace.shared.open(URL(fileURLWithPath: full))
+        return "opened \(full)"
     }
 
     private func runShell(_ command: String) -> String {

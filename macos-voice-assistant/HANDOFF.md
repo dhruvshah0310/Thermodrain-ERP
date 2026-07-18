@@ -35,16 +35,29 @@ Mac is a build-check/cleanup pass.
   etc. on) — same gating applies to the MCP server. Shell denylist kept as an accident net.
 - **Model picker** in menu; model read live per command.
 
-## Exact next 3 steps
-1. **Full-disk file access mode** — add config `allowFullFileAccess` (default false) + tools
+## Recently completed (this pass — written, NOT compiled on a Mac)
+1. **Full-disk file access mode** — DONE. Config `allowFullFileAccess` (default false) + tools
    `read_any_file`, `write_any_file`, `list_directory`, `move_path`, `delete_path`, `open_path`
-   (tilde-expanded absolute paths; reuse shell denylist idea for deletes). Wire into
-   `ToolDefinition.swift` + `ToolExecutor.swift`; they auto-appear in MCP.
-2. **Conversation memory** — keep last ~6 turns in `JarvisController` and pass prior turns to
-   `ClaudeClient.converse` so follow-ups ("reply to him", "open it") have context. Clear on a long
-   idle gap.
-3. **Verify-after-action** — prompt guidance already asks for screenshot-to-verify; add a light
-   post-action screenshot on UI tool sequences and have Claude confirm/retry.
+   (tilde-expanded absolute paths). `delete_path` refuses a denylist of critical system/home paths.
+   Wired into `ToolDefinition.swift` + `ToolExecutor.swift` (auto-appears in MCP) + a menu toggle in
+   `StatusBarController.swift`.
+2. **Conversation memory** — DONE. `JarvisController` keeps the last ~6 plain-text turns
+   (`conversationHistory`), passes them via a new `history:` param on `ClaudeClient.converse`, and
+   clears them after `conversationMemoryTimeout` (default 180s) idle.
+3. **Verify-after-action** — DONE. `verifyActions` config (default true): `type_text`/`press_key`/
+   `paste_text` results append a screenshot-and-confirm nudge when screen control is on; system
+   prompt reinforced.
+
+Note: `ToolExecutor` is now built per-command from live config in `JarvisController.handle` (not
+once at init) so menu toggles take effect immediately instead of only after relaunch.
+
+## Exact next 3 steps
+1. **Build-check on a real Mac** — first task on a Mac: `swift build -c release`, fix any compile
+   errors (none of the above is compiled yet), then smoke-test full file access, memory follow-ups,
+   and the verify nudge.
+2. **Persistent memory file** — a notes file Jarvis reads at launch and appends learnings/preferences
+   to, so facts survive across sessions (the conversation memory above is in-RAM only).
+3. **Barge-in** — let the user interrupt Jarvis mid-reply by speaking (stop TTS + capture).
 
 ## Watch-outs for the new chat
 - Cannot compile here — keep changes isolated, flag untested.

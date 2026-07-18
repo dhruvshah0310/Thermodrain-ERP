@@ -15,9 +15,12 @@ struct ClaudeClient {
         systemPrompt: String,
         tools: [ToolDefinition],
         serverTools: [[String: Any]],
-        executor: ToolExecutor
+        executor: ToolExecutor,
+        history: [[String: Any]] = []
     ) async throws -> String {
-        var messages: [[String: Any]] = [["role": "user", "content": userText]]
+        // Prior plain-text turns (user/assistant) give follow-ups like "reply to him" or "open it"
+        // the context they need; the new command is appended as the latest user turn.
+        var messages: [[String: Any]] = history + [["role": "user", "content": userText]]
         var iterations = 0
 
         while iterations < maxIterations {
