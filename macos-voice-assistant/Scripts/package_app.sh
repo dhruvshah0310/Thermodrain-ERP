@@ -52,9 +52,11 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc sign (the "-" identity). Personal use only; not a Developer ID signature.
-echo "Code-signing (ad-hoc)…"
-codesign --force --deep --sign - "$DEST"
+# Ad-hoc sign (the "-" identity) with the camera / microphone / Apple-Events entitlements. Personal
+# use only; not a Developer ID signature. The entitlements plus the Info.plist usage strings are what
+# let macOS prompt for and remember Camera, Microphone, and automation access.
+echo "Code-signing (ad-hoc, with entitlements)…"
+codesign --force --deep --entitlements "$(dirname "$0")/Jarvis.entitlements" --sign - "$DEST"
 
 echo ""
 echo "Done. JarvisAssistant.app is in your Applications folder."

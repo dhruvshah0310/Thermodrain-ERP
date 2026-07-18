@@ -42,10 +42,19 @@ final class MotionControl: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
 
     func start() {
         guard !isRunning else { return }
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        Logger.shared.log("Motion control: requested. Current camera authorization = \(status.rawValue) (0=notDetermined, 1=restricted, 2=denied, 3=authorized).")
+        switch status {
+        case .denied, .restricted:
+            Logger.shared.log("Motion control: camera access is denied. Turn it on in System Settings > Privacy & Security > Camera for JarvisAssistant, then re-enable Motion Control. If JarvisAssistant isn't listed, run: tccutil reset Camera com.jarvis.assistant")
+            return
+        default:
+            break
+        }
         AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
             guard let self else { return }
             guard granted else {
-                Logger.shared.log("Motion control: camera permission denied. Enable it in System Settings > Privacy & Security > Camera.")
+                Logger.shared.log("Motion control: camera permission not granted.")
                 return
             }
             self.queue.async { self.configureAndRun() }
