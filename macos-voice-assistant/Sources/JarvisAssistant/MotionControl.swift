@@ -5,6 +5,7 @@ import CoreGraphics
 import CoreMedia
 import CoreVideo
 import ImageIO
+import ApplicationServices
 
 /// Camera-based hand-gesture control, so you can drive the Mac without touching it while Jarvis is
 /// running. It watches the front camera with Vision's hand-pose detector and maps gestures to input:
@@ -37,11 +38,23 @@ final class MotionControl: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private var lastScrollY: CGFloat?
     private var lastSwipeX: CGFloat?
     private var lastActionAt: [String: Date] = [:]
+    private var lastLogAt = Date.distantPast
 
     // MARK: - Lifecycle
 
     func start() {
         guard !isRunning else { return }
+
+        // Moving the cursor / keys needs Accessibility trust. Because ad-hoc signing re-signs the app
+        // on every rebuild, a previously-granted entry can look enabled in System Settings but no
+        // longer apply to the new binary — the classic reason gestures do nothing though the camera
+        // works. Surface it loudly.
+        if !AXIsProcessTrusted() {
+            Logger.shared.log("Motion control: ACCESSIBILITY IS NOT TRUSTED for this build — cursor/keyboard gestures will be ignored even though the camera works. Fix: System Settings > Privacy & Security > Accessibility, REMOVE the old JarvisAssistant entry with the – button, then add ~/Applications/JarvisAssistant.app again (a rebuild changes the app's signature, so the old grant no longer applies).")
+        } else {
+            Logger.shared.log("Motion control: Accessibility is trusted. Good.")
+        }
+
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         Logger.shared.log("Motion control: requested. Current camera authorization = \(status.rawValue) (0=notDetermined, 1=restricted, 2=denied, 3=authorized).")
         switch status {
@@ -138,6 +151,13 @@ final class MotionControl: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         let indexTip = point(hand, .indexTip)
         let thumbTip = point(hand, .thumbTip)
         let pinchD: CGFloat? = (indexTip != nil && thumbTip != nil) ? dist(indexTip!, thumbTip!) : nil
+
+        // Heartbeat so the log shows detection is happening (throttled to ~1.5s).
+        if Date().timeIntervalSince(lastLogAt) > 1.5 {
+            lastLogAt = Date()
+            let idxStr = indexTip.map { "(\(String(format: "%.2f", $0.x)),\(String(format: "%.2f", $0.y)))" } ?? "nil"
+            Logger.shared.log("Motion control: hand detected — extended fingers=\(extendedCount) index=\(indexUp) middle=\(middleUp) indexTip=\(idxStr) axTrusted=\(AXIsProcessTrusted()).")
+        }
 
         // ----- Open palm: swipe between Spaces -----
         if extendedCount >= 4 {

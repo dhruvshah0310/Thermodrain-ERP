@@ -52,11 +52,23 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc sign (the "-" identity) with the camera / microphone / Apple-Events entitlements. Personal
-# use only; not a Developer ID signature. The entitlements plus the Info.plist usage strings are what
-# let macOS prompt for and remember Camera, Microphone, and automation access.
-echo "Code-signing (ad-hoc, with entitlements)…"
-codesign --force --deep --entitlements "$(dirname "$0")/Jarvis.entitlements" --sign - "$DEST"
+# Sign with the camera / microphone / Apple-Events entitlements plus the Info.plist usage strings —
+# together these let macOS prompt for and remember Camera, Microphone, and automation access.
+#
+# IMPORTANT: ad-hoc ("-") signatures change on every rebuild, so macOS treats each build as a new app
+# and your granted permissions (especially Accessibility, which never re-prompts) silently stop
+# applying. To make permissions PERSIST across rebuilds, create a one-time self-signed code-signing
+# certificate named "Jarvis Local Signing" (Keychain Access > Certificate Assistant > Create a
+# Certificate… > Code Signing). If it exists we use it; otherwise we fall back to ad-hoc.
+SIGN_IDENTITY="Jarvis Local Signing"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+    echo "Code-signing with stable identity '$SIGN_IDENTITY' (permissions persist across rebuilds)…"
+    SIGN_ARG="$SIGN_IDENTITY"
+else
+    echo "Code-signing (ad-hoc — permissions must be re-granted after each rebuild; see notes in this script)…"
+    SIGN_ARG="-"
+fi
+codesign --force --deep --entitlements "$(dirname "$0")/Jarvis.entitlements" --sign "$SIGN_ARG" "$DEST"
 
 echo ""
 echo "Done. JarvisAssistant.app is in your Applications folder."
