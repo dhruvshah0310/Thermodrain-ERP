@@ -6,10 +6,9 @@ does everything on the Mac a human can, accuracy over speed. Items get checked o
 
 ## In progress / next
 
-- [ ] **System control tools** — volume, brightness, mute, Do Not Disturb, sleep/lock, media
-      play/pause.
-- [ ] **Dedicated app tools** — Calendar, Reminders, Notes, Messages (iMessage), Music, Finder.
 - [ ] **Full file access mode** (config-gated) — read/write/move/delete/list anywhere on disk.
+- [ ] **Conversation memory** — retain the last several turns across commands.
+- [ ] **Verify-after-action** — screenshot to confirm a UI action worked; retry or report honestly.
 
 ## Backlog (rough priority)
 
@@ -49,3 +48,8 @@ does everything on the Mac a human can, accuracy over speed. Items get checked o
 - [x] **MCP connector** — the same binary runs as an MCP server (`--mcp`, stdio JSON-RPC) exposing
       all local Mac-control tools, so Claude Desktop can operate the Mac. Logger now writes to
       stderr so it never corrupts the protocol stream on stdout.
+- [x] **System control tools** — `set_volume`, `get_volume`, `set_mute`, `adjust_brightness`,
+      `lock_screen`, `system_sleep`.
+- [x] **Dedicated app tools** — `control_music`, `add_reminder`, `create_note`, `send_imessage`,
+      `create_calendar_event` (dates built via component-setting AppleScript to avoid locale
+      parsing issues). All flow into the MCP connector automatically.

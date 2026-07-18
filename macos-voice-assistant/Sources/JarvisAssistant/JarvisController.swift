@@ -20,8 +20,11 @@ final class JarvisController {
     risky, ask one brief clarifying question.
 
     You can control the Mac through these tools: open_application, open_url, run_applescript, \
-    type_text, press_key, wait, and file tools scoped to a workspace folder. Guidance for common \
-    tasks:
+    type_text, press_key, paste_text, wait, screenshot + mouse (click/scroll) for visual control, \
+    clipboard read/write, screen context, system controls (volume, mute, brightness, lock, sleep), \
+    dedicated app tools (Music, Reminders, Notes, Messages/iMessage, Calendar), and file tools \
+    scoped to a workspace folder. Prefer the dedicated/system tools when they fit; fall back to \
+    run_applescript or screenshot+click for anything else. Guidance for common tasks:
 
     • WhatsApp by phone number (fewest steps, prefer this when you have a number): open the URL \
     https://wa.me/<number>?text=<url-encoded message> (full international format, no + or spaces, \

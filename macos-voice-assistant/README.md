@@ -147,6 +147,12 @@ to let apps catch up. Its instructions include recipes for common tasks:
 - **Anything else** — it can focus an app and type/click through its UI. For long messages or
   text with emoji/special characters it uses `paste_text` (clipboard + paste), which is more
   reliable than typing key-by-key.
+- **Dedicated app + system tools** — beyond generic control, Jarvis has purpose-built tools for
+  common things: play/pause/skip in **Music**, add a **Reminder**, create a **Note**, send an
+  **iMessage**, create a **Calendar** event, plus system controls (**volume**, **mute**,
+  **brightness**, **lock screen**, **sleep**) and **clipboard** read/write. These are more
+  reliable than driving each app's UI by hand, and they're available over the MCP connector too.
+  Say *"Jarvis, remind me to call the bank at 4pm"* or *"Jarvis, set the volume to 30"*.
 - **Questions / drafting / advice** — it answers from Claude's knowledge.
 - **Looking things up** — when the answer needs current or factual info (news, weather, prices,
   scores, recent events), Jarvis searches the web first via Anthropic's hosted web-search tool

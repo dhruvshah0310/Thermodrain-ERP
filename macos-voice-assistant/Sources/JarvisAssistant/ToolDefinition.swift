@@ -137,6 +137,114 @@ enum JarvisTools {
                     "required": ["text"]
                 ]
             ))
+
+            // ---- System controls ----
+            tools.append(ToolDefinition(
+                name: "set_volume",
+                description: "Set the Mac's output volume to a level from 0 (silent) to 100 (max).",
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["level": ["type": "number", "description": "Volume 0–100"]],
+                    "required": ["level"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "get_volume",
+                description: "Get the Mac's current output volume (0–100) and mute state.",
+                inputSchema: ["type": "object", "properties": [String: Any]()]
+            ))
+            tools.append(ToolDefinition(
+                name: "set_mute",
+                description: "Mute or unmute the Mac's output.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["muted": ["type": "boolean", "description": "true to mute, false to unmute"]],
+                    "required": ["muted"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "adjust_brightness",
+                description: "Nudge display brightness up or down a few steps (best-effort via the brightness keys).",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "direction": ["type": "string", "enum": ["up", "down"]],
+                        "steps": ["type": "number", "description": "How many key presses (1–16)"]
+                    ],
+                    "required": ["direction"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "lock_screen",
+                description: "Lock the Mac's screen (requires the password/Touch ID to get back in).",
+                inputSchema: ["type": "object", "properties": [String: Any]()]
+            ))
+            tools.append(ToolDefinition(
+                name: "system_sleep",
+                description: "Put the Mac to sleep.",
+                inputSchema: ["type": "object", "properties": [String: Any]()]
+            ))
+
+            // ---- Dedicated app tools ----
+            tools.append(ToolDefinition(
+                name: "control_music",
+                description: "Control the Music app: play, pause, toggle (play/pause), next, or previous track.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": ["action": ["type": "string", "enum": ["play", "pause", "toggle", "next", "previous"]]],
+                    "required": ["action"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "add_reminder",
+                description: "Add a reminder to the Reminders app, with an optional due date/time.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "text": ["type": "string", "description": "What to be reminded about"],
+                        "due": ["type": "string", "description": "Optional due date/time, ISO 8601 e.g. 2026-07-18T15:00"]
+                    ],
+                    "required": ["text"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "create_note",
+                description: "Create a note in the Notes app.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string", "description": "Optional title (becomes the first line)"],
+                        "body": ["type": "string", "description": "Note contents"]
+                    ],
+                    "required": ["body"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "send_imessage",
+                description: "Send an iMessage/SMS to a phone number or email via the Messages app. Confirm the recipient if unsure.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "recipient": ["type": "string", "description": "Phone number (with country code) or email"],
+                        "text": ["type": "string", "description": "Message text"]
+                    ],
+                    "required": ["recipient", "text"]
+                ]
+            ))
+            tools.append(ToolDefinition(
+                name: "create_calendar_event",
+                description: "Create an event in the Calendar app.",
+                inputSchema: [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string"],
+                        "start": ["type": "string", "description": "Start date/time, ISO 8601 e.g. 2026-07-18T15:00"],
+                        "end": ["type": "string", "description": "Optional end (defaults to 1 hour after start)"],
+                        "calendar": ["type": "string", "description": "Optional calendar name; defaults to the first calendar"]
+                    ],
+                    "required": ["title", "start"]
+                ]
+            ))
         }
 
         if config.allowScreenControl {

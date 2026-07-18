@@ -108,6 +108,71 @@ actor ToolExecutor {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             return "clipboard set (\(text.count) characters)"
+
+        // ---- System controls ----
+        case "set_volume":
+            guard config.allowAppleScript, let level = numeric(input["level"]) else {
+                return "error: applescript disabled or missing level"
+            }
+            let clamped = Int(min(max(level, 0), 100))
+            let r = runAppleScript("set volume output volume \(clamped)")
+            return r.hasPrefix("applescript error") ? r : "volume set to \(clamped)"
+        case "get_volume":
+            guard config.allowAppleScript else { return "error: applescript disabled" }
+            let vol = runAppleScript("output volume of (get volume settings)")
+            let muted = runAppleScript("output muted of (get volume settings)")
+            return "volume \(vol.trimmingCharacters(in: .whitespacesAndNewlines)), muted: \(muted.trimmingCharacters(in: .whitespacesAndNewlines))"
+        case "set_mute":
+            guard config.allowAppleScript, let muted = input["muted"] as? Bool else {
+                return "error: applescript disabled or missing muted"
+            }
+            let r = runAppleScript(muted ? "set volume with output muted" : "set volume without output muted")
+            return r.hasPrefix("applescript error") ? r : (muted ? "muted" : "unmuted")
+        case "adjust_brightness":
+            guard config.allowAppleScript, let direction = input["direction"] as? String else {
+                return "error: applescript disabled or missing direction"
+            }
+            let steps = Int(min(max(numeric(input["steps"]) ?? 1, 1), 16))
+            // Brightness up = key code 144, down = 145 on most Macs (best-effort).
+            let code = direction == "down" ? 145 : 144
+            let body = Array(repeating: "key code \(code)", count: steps).joined(separator: "\n")
+            let r = runAppleScript(systemEventsScript(action: body, app: nil))
+            return r.hasPrefix("applescript error") ? accessibilityHint(r) : "brightness \(direction) x\(steps)"
+        case "lock_screen":
+            guard config.allowAppleScript else { return "error: applescript disabled" }
+            let r = runAppleScript(systemEventsScript(action: "keystroke \"q\" using {command down, control down}", app: nil))
+            return r.hasPrefix("applescript error") ? accessibilityHint(r) : "screen locked"
+        case "system_sleep":
+            guard config.allowAppleScript else { return "error: applescript disabled" }
+            let r = runAppleScript("tell application \"System Events\" to sleep")
+            return r.hasPrefix("applescript error") ? r : "sleeping"
+
+        // ---- Dedicated app tools ----
+        case "control_music":
+            guard config.allowAppleScript, let action = input["action"] as? String else {
+                return "error: applescript disabled or missing action"
+            }
+            return controlMusic(action)
+        case "add_reminder":
+            guard config.allowAppleScript, let text = input["text"] as? String else {
+                return "error: applescript disabled or missing text"
+            }
+            return addReminder(text, due: input["due"] as? String)
+        case "create_note":
+            guard config.allowAppleScript, let body = input["body"] as? String else {
+                return "error: applescript disabled or missing body"
+            }
+            return createNote(title: input["title"] as? String, body: body)
+        case "send_imessage":
+            guard config.allowAppleScript, let recipient = input["recipient"] as? String, let text = input["text"] as? String else {
+                return "error: applescript disabled or missing recipient/text"
+            }
+            return sendIMessage(recipient: recipient, text: text)
+        case "create_calendar_event":
+            guard config.allowAppleScript, let title = input["title"] as? String, let start = input["start"] as? String else {
+                return "error: applescript disabled or missing title/start"
+            }
+            return createCalendarEvent(title: title, start: start, end: input["end"] as? String, calendar: input["calendar"] as? String)
         case "read_file":
             guard config.allowFileAccess, let path = input["path"] as? String else {
                 return "error: file access disabled or missing path"
@@ -159,6 +224,115 @@ actor ToolExecutor {
         if let i = value as? Int { return Double(i) }
         if let s = value as? String { return Double(s) }
         return nil
+    }
+
+    // MARK: - Dedicated app tools
+
+    private func controlMusic(_ action: String) -> String {
+        let command: String
+        switch action {
+        case "play": command = "play"
+        case "pause": command = "pause"
+        case "toggle": command = "playpause"
+        case "next": command = "next track"
+        case "previous": command = "previous track"
+        default: return "error: unknown music action \(action)"
+        }
+        let r = runAppleScript("tell application \"Music\" to \(command)")
+        return r.hasPrefix("applescript error") ? r : "music: \(action)"
+    }
+
+    private func addReminder(_ text: String, due: String?) -> String {
+        var script = "tell application \"Reminders\"\n"
+        if let due, let date = parseISODate(due) {
+            script += dateStatements(varName: "dueDate", from: date)
+            script += "make new reminder with properties {name:\(appleScriptLiteral(text)), due date:dueDate}\n"
+        } else {
+            script += "make new reminder with properties {name:\(appleScriptLiteral(text))}\n"
+        }
+        script += "end tell"
+        let r = runAppleScript(script)
+        return r.hasPrefix("applescript error") ? r : "reminder added: \(text)"
+    }
+
+    private func createNote(title: String?, body: String) -> String {
+        // Notes derives the title from the first line of the body.
+        let fullBody = (title.map { "\($0)\n" } ?? "") + body
+        let script = """
+        tell application "Notes"
+            make new note with properties {body:\(appleScriptLiteral(fullBody))}
+        end tell
+        """
+        let r = runAppleScript(script)
+        return r.hasPrefix("applescript error") ? r : "note created"
+    }
+
+    private func sendIMessage(recipient: String, text: String) -> String {
+        let script = """
+        tell application "Messages"
+            set targetService to 1st service whose service type = iMessage
+            set targetBuddy to buddy \(appleScriptLiteral(recipient)) of targetService
+            send \(appleScriptLiteral(text)) to targetBuddy
+        end tell
+        """
+        let r = runAppleScript(script)
+        if r.hasPrefix("applescript error") {
+            return r + " (sending iMessage may require the recipient to be reachable via iMessage, and Messages to be signed in)"
+        }
+        return "message sent to \(recipient) (not verified delivered)"
+    }
+
+    private func createCalendarEvent(title: String, start: String, end: String?, calendar: String?) -> String {
+        guard let startDate = parseISODate(start) else {
+            return "error: could not parse start date '\(start)'. Use ISO 8601 like 2026-07-18T15:00."
+        }
+        let endDate = end.flatMap { parseISODate($0) } ?? startDate.addingTimeInterval(3600)
+        let calTarget = calendar.map { "calendar \(appleScriptLiteral($0))" } ?? "first calendar"
+        let script = """
+        tell application "Calendar"
+        \(dateStatements(varName: "startDate", from: startDate))\(dateStatements(varName: "endDate", from: endDate))    tell \(calTarget)
+                make new event with properties {summary:\(appleScriptLiteral(title)), start date:startDate, end date:endDate}
+            end tell
+        end tell
+        """
+        let r = runAppleScript(script)
+        return r.hasPrefix("applescript error") ? r : "event created: \(title)"
+    }
+
+    /// Parse a lenient ISO 8601 string (with or without seconds / timezone) into a Date.
+    private func parseISODate(_ string: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: string) { return d }
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: string) { return d }
+        for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.dateFormat = format
+            if let d = df.date(from: string) { return d }
+        }
+        return nil
+    }
+
+    /// Emit AppleScript statements that build a named date variable from components, avoiding
+    /// locale-dependent `date "…"` string parsing. Day is set to 1 first so setting the month can't
+    /// overflow (e.g. current day 31 into a 30-day month). Trailing newline included.
+    private func dateStatements(varName: String, from date: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        let y = c.year ?? 2026, mo = c.month ?? 1, d = c.day ?? 1
+        let h = c.hour ?? 0, mi = c.minute ?? 0, s = c.second ?? 0
+        return """
+            set \(varName) to (current date)
+            set day of \(varName) to 1
+            set year of \(varName) to \(y)
+            set month of \(varName) to \(mo)
+            set day of \(varName) to \(d)
+            set hours of \(varName) to \(h)
+            set minutes of \(varName) to \(mi)
+            set seconds of \(varName) to \(s)
+
+        """
     }
 
     // MARK: - Screen capture
