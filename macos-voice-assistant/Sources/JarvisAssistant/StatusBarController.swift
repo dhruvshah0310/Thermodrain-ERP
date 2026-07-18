@@ -28,32 +28,28 @@ final class StatusBarController {
     init(assistant: JarvisController) {
         self.assistant = assistant
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "waveform.circle", accessibilityDescription: "Jarvis idle")
+        statusItem.button?.image = JarvisIcon.reactor()
         buildMenu()
     }
 
     func setState(_ state: State) {
-        let symbol: String
-        let description: String
+        // Idle shows the Iron-Man arc-reactor glyph; the active states use expressive SF Symbols so
+        // you can still read what Jarvis is doing at a glance from the menu bar.
+        let image: NSImage?
         switch state {
         case .idleListening:
-            symbol = "waveform.circle"
-            description = "Jarvis idle, listening for wake word"
+            image = JarvisIcon.reactor()
         case .capturing:
-            symbol = "mic.circle.fill"
-            description = "Jarvis capturing your command"
+            image = NSImage(systemSymbolName: "mic.circle.fill", accessibilityDescription: "Jarvis capturing your command")
         case .thinking:
-            symbol = "ellipsis.circle"
-            description = "Jarvis thinking"
+            image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Jarvis thinking")
         case .speaking:
-            symbol = "speaker.wave.2.circle.fill"
-            description = "Jarvis speaking"
+            image = NSImage(systemSymbolName: "speaker.wave.2.circle.fill", accessibilityDescription: "Jarvis speaking")
         case .error:
-            symbol = "exclamationmark.circle"
-            description = "Jarvis error"
+            image = NSImage(systemSymbolName: "exclamationmark.circle", accessibilityDescription: "Jarvis error")
         }
         DispatchQueue.main.async {
-            self.statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
+            self.statusItem.button?.image = image
         }
     }
 
@@ -108,6 +104,24 @@ final class StatusBarController {
         }
         modelItem.submenu = modelSubmenu
         menu.addItem(modelItem)
+
+        // Voice picker submenu (male / female).
+        let voiceItem = NSMenuItem(title: "Voice", action: nil, keyEquivalent: "")
+        let voiceSubmenu = NSMenu()
+        for (label, value) in [("Male", "male"), ("Female", "female")] {
+            let item = NSMenuItem(title: label, action: #selector(selectVoice(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = value
+            item.state = (assistant.config.voiceGender.lowercased() == value) ? .on : .off
+            voiceSubmenu.addItem(item)
+        }
+        voiceItem.submenu = voiceSubmenu
+        menu.addItem(voiceItem)
+
+        let overlayItem = NSMenuItem(title: "Show Siri-style Window", action: #selector(toggleOverlay), keyEquivalent: "")
+        overlayItem.target = self
+        overlayItem.state = assistant.config.showOverlay ? .on : .off
+        menu.addItem(overlayItem)
 
         let screenItem = NSMenuItem(title: "Allow Screen Control (see & click)", action: #selector(toggleScreenControl), keyEquivalent: "")
         screenItem.target = self
@@ -240,6 +254,22 @@ final class StatusBarController {
         info.messageText = "Model set to \(sender.title)"
         info.informativeText = "New commands will use this model. If it's a model your account can't access, you'll hear an error — pick another from the Model menu."
         info.runModal()
+    }
+
+    @objc private func selectVoice(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String else { return }
+        assistant.config.voiceGender = value
+        // A custom voiceIdentifier would override the gender choice, so clear it when the user
+        // explicitly picks male/female from the menu.
+        assistant.config.voiceIdentifier = nil
+        assistant.config.save()
+        buildMenu()
+    }
+
+    @objc private func toggleOverlay() {
+        assistant.config.showOverlay.toggle()
+        assistant.config.save()
+        buildMenu()
     }
 
     @objc private func toggleScreenControl() {

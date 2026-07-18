@@ -4,6 +4,9 @@ struct Config: Codable {
     var model: String
     var wakeWord: String
     var voiceIdentifier: String?
+    // Which voice to speak with when voiceIdentifier isn't set: "male" or "female". Jarvis resolves
+    // this to the best-matching installed English voice at speak time. Toggle it from the menu.
+    var voiceGender: String
     var speechRate: Float
     var allowShellCommands: Bool
     var allowAppleScript: Bool
@@ -47,6 +50,9 @@ struct Config: Codable {
     // After UI actions (typing, clicking, sending a message), nudge Claude to screenshot and
     // confirm the effect before reporting success — accuracy over speed. Needs allowScreenControl.
     var verifyActions: Bool
+    // Show the Siri-style floating window (with the arc-reactor animation) while Jarvis is
+    // listening, thinking, and speaking. Turn off for a purely menu-bar, no-window experience.
+    var showOverlay: Bool
 
     static let `default` = Config(
         // Claude Code's internal short model names (e.g. "claude-sonnet-5") don't always match the
@@ -56,6 +62,7 @@ struct Config: Codable {
         model: "claude-sonnet-5",
         wakeWord: "jarvis",
         voiceIdentifier: nil,
+        voiceGender: "male",
         speechRate: 0.5,
         allowShellCommands: false,
         allowAppleScript: true,
@@ -75,7 +82,8 @@ struct Config: Codable {
         allowWebSearch: true,
         allowScreenControl: true,
         conversationMemoryTimeout: 180,
-        verifyActions: true
+        verifyActions: true,
+        showOverlay: true
     )
 
     // Resilient decoding: any key missing from an older config.json falls back to the default,
@@ -86,6 +94,7 @@ struct Config: Codable {
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
         wakeWord = try c.decodeIfPresent(String.self, forKey: .wakeWord) ?? d.wakeWord
         voiceIdentifier = try c.decodeIfPresent(String.self, forKey: .voiceIdentifier) ?? d.voiceIdentifier
+        voiceGender = try c.decodeIfPresent(String.self, forKey: .voiceGender) ?? d.voiceGender
         speechRate = try c.decodeIfPresent(Float.self, forKey: .speechRate) ?? d.speechRate
         allowShellCommands = try c.decodeIfPresent(Bool.self, forKey: .allowShellCommands) ?? d.allowShellCommands
         allowAppleScript = try c.decodeIfPresent(Bool.self, forKey: .allowAppleScript) ?? d.allowAppleScript
@@ -106,21 +115,23 @@ struct Config: Codable {
         allowScreenControl = try c.decodeIfPresent(Bool.self, forKey: .allowScreenControl) ?? d.allowScreenControl
         conversationMemoryTimeout = try c.decodeIfPresent(Double.self, forKey: .conversationMemoryTimeout) ?? d.conversationMemoryTimeout
         verifyActions = try c.decodeIfPresent(Bool.self, forKey: .verifyActions) ?? d.verifyActions
+        showOverlay = try c.decodeIfPresent(Bool.self, forKey: .showOverlay) ?? d.showOverlay
     }
 
     private init(
-        model: String, wakeWord: String, voiceIdentifier: String?, speechRate: Float,
+        model: String, wakeWord: String, voiceIdentifier: String?, voiceGender: String, speechRate: Float,
         allowShellCommands: Bool, allowAppleScript: Bool, allowOpenApps: Bool, allowFileAccess: Bool,
         allowFullFileAccess: Bool,
         workspaceDirectory: String, maxToolIterations: Int, launchAtLogin: Bool,
         silenceTimeout: Double, commandStartTimeout: Double,
         conversationMode: Bool, followUpWindow: Double, greetOnLaunch: Bool, userName: String?,
         speechLocale: String, allowWebSearch: Bool, allowScreenControl: Bool,
-        conversationMemoryTimeout: Double, verifyActions: Bool
+        conversationMemoryTimeout: Double, verifyActions: Bool, showOverlay: Bool
     ) {
         self.model = model
         self.wakeWord = wakeWord
         self.voiceIdentifier = voiceIdentifier
+        self.voiceGender = voiceGender
         self.speechRate = speechRate
         self.allowShellCommands = allowShellCommands
         self.allowAppleScript = allowAppleScript
@@ -141,6 +152,7 @@ struct Config: Codable {
         self.allowScreenControl = allowScreenControl
         self.conversationMemoryTimeout = conversationMemoryTimeout
         self.verifyActions = verifyActions
+        self.showOverlay = showOverlay
     }
 
     var workspaceURL: URL {

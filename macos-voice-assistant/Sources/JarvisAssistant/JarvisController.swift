@@ -8,6 +8,11 @@ final class JarvisController {
     private let speechEngine: SpeechEngine
     private let speechOutput = SpeechOutput()
     private var statusBar: StatusBarController!
+    // Siri-style floating window (arc-reactor). Created on launch when config.showOverlay is on.
+    private var overlay: HUDWindowController?
+    // True while a command is being handled (thinking → speaking). Used so the overlay isn't hidden
+    // by the speech engine's idle rotations that happen underneath while Jarvis is busy.
+    private var isBusy = false
 
     // Rolling conversation memory: the last few plain-text user/assistant turns, so follow-up
     // commands ("reply to him", "open it", "what about tomorrow?") carry context. Kept text-only
@@ -174,8 +179,20 @@ final class JarvisController {
                 return
             }
 
+            if self.config.showOverlay {
+                self.overlay = HUDWindowController()
+            }
+
             self.speechEngine.onStateChange = { [weak self] state in
-                self?.statusBar.setState(state == .triggered ? .capturing : .idleListening)
+                guard let self else { return }
+                self.statusBar.setState(state == .triggered ? .capturing : .idleListening)
+                if state == .triggered {
+                    self.overlay?.showListening()
+                } else if !self.isBusy {
+                    // Only fold the overlay away on a genuine return to idle, not on the background
+                    // recognition rotations that happen while a command is being worked on.
+                    self.overlay?.scheduleHide()
+                }
             }
             self.speechEngine.onCommand = { [weak self] command in
                 self?.handle(command: command)
@@ -213,13 +230,16 @@ final class JarvisController {
     private func speak(_ text: String) {
         speechEngine.setMuted(true)
         statusBar.setState(.speaking)
-        speechOutput.speak(text, voiceIdentifier: config.voiceIdentifier, rate: config.speechRate) { [weak self] in
+        speechOutput.speak(text, voiceIdentifier: config.voiceIdentifier, gender: config.voiceGender, rate: config.speechRate) { [weak self] in
             guard let self else { return }
+            self.isBusy = false
             self.speechEngine.setMuted(false)
             if self.config.conversationMode {
+                // armFollowUp fires .triggered, which re-shows the overlay in listening mode.
                 self.speechEngine.armFollowUp()
             } else {
                 self.statusBar.setState(.idleListening)
+                self.overlay?.scheduleHide()
             }
         }
     }
@@ -257,6 +277,8 @@ final class JarvisController {
 
         Logger.shared.log("Command: \(command)")
         statusBar.setState(.thinking)
+        isBusy = true
+        overlay?.showThinking(command)
 
         // Drop stale context: if it's been a while since the last command, start fresh so an
         // unrelated command doesn't inherit an old conversation's context.
@@ -286,12 +308,15 @@ final class JarvisController {
                 Logger.shared.log("Reply: \(reply)")
                 await MainActor.run {
                     self.recordTurn(command: command, reply: reply)
+                    self.overlay?.showSpeaking(reply)
                     self.speak(reply)
                 }
             } catch {
                 Logger.shared.log("Claude error: \(error.localizedDescription)")
                 await MainActor.run {
-                    self.speak("Sorry, I ran into an error reaching Claude. Check the log for details.")
+                    let message = "Sorry, I ran into an error reaching Claude. Check the log for details."
+                    self.overlay?.showSpeaking(message)
+                    self.speak(message)
                 }
             }
         }

@@ -69,7 +69,8 @@ permanent location to point at:
 |---|---|
 | `model` | Anthropic model ID to call. |
 | `wakeWord` | Word/phrase that activates command capture (default `"jarvis"`). |
-| `voiceIdentifier` | `AVSpeechSynthesisVoice` identifier to use, or `null` for the system default English voice. |
+| `voiceIdentifier` | A specific `AVSpeechSynthesisVoice` identifier to force, or `null` to auto-pick by `voiceGender`. |
+| `voiceGender` | `"male"` (default) or `"female"` — which voice Jarvis speaks with when `voiceIdentifier` is null. Auto-resolves to the best installed English voice of that gender (prefers a British accent). Also a **Voice** submenu in the menu bar. |
 | `speechRate` | TTS speaking rate (`AVSpeechUtterance.rate`, roughly 0.0–1.0). |
 | `allowShellCommands` | Off by default. Lets Claude run arbitrary zsh commands (see Safety below). |
 | `allowAppleScript` | On by default. Lets Claude control Mac apps/system settings via AppleScript. |
@@ -90,6 +91,7 @@ permanent location to point at:
 | `allowScreenControl` | On by default. Lets Jarvis take screenshots (see the screen) and control the mouse (click/scroll) — true "computer use." Needs Screen Recording + Accessibility permissions. |
 | `conversationMemoryTimeout` | Seconds of idle before Jarvis forgets the running conversation (default 180). The last ~6 turns are kept so follow-ups like "reply to him" / "open it" have context; after this gap the next command starts fresh. |
 | `verifyActions` | On by default. After blind keystroke actions (typing, key presses, pasting), nudges Claude to screenshot and confirm the effect before claiming success. Needs `allowScreenControl` to be useful. |
+| `showOverlay` | On by default. Shows a Siri-style floating window with an Iron-Man arc-reactor animation while Jarvis is listening, thinking, and speaking. Toggle from the menu (**Show Siri-style Window**); turn off for a pure menu-bar experience. |
 
 Restart the app after hand-editing the config file. `conversationMode`, `greetOnLaunch`, and the
 allow-flags also have menu bar toggles.
