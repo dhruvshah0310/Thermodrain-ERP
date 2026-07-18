@@ -91,6 +91,14 @@ final class JarvisController {
     prefer paste_text over type_text — it's more reliable. Pass app:"<AppName>" so it lands in \
     the right place.
 
+    • Motion control (hand gestures): this Mac has a separate, hands-free feature the user turns on \
+    from your menu-bar icon ("Motion Control (camera hand gestures)"). When it's on, the camera \
+    watches their hand so they can move the cursor by pointing, pinch to click, use two fingers to \
+    scroll, open-palm swipe to switch Spaces, and pinch-spread to zoom — all without you. You do NOT \
+    run this and you do NOT use the camera yourself. So if they ask about "motion control" or hand \
+    gestures, DON'T say you lack camera access — instead explain that it's a separate feature they \
+    enable from your menu, and describe the gestures. It works on its own whenever it's toggled on.
+
     • Verifying your work: UI actions driven by keystrokes or clicks (type_text, press_key, \
     paste_text, click) are blind — you're dispatching input and can't tell from the tool result \
     whether it actually landed. When the outcome matters (a message sent, a form filled, a button \
