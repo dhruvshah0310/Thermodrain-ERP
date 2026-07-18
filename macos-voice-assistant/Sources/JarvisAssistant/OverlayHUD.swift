@@ -1,280 +1,178 @@
 import AppKit
+import WebKit
 
-/// Sumo — Thermodrain's mascot — drawn as sleek line-art (outline only, no fills): navy contours with
-/// gold/orange accent strokes, and an angry, furrowed expression. He acts out what Jarvis is doing:
-///   • listening → head leans in, one hand cupped to the ear
-///   • thinking   → drops into a low sumo squat, eyes narrowed in focus
-///   • speaking   → mouth moves in time with Jarvis's voice while his hands gesture
-/// He springs in with a bounce. All state is a set of eased parameters advanced by a ~30 fps timer;
-/// `draw(_:)` re-renders the current pose from them, so pose changes are smooth interpolations.
-final class SumoView: NSView {
-    enum Pose { case listening, thinking, speaking }
+enum SumoPose { case listening, thinking, speaking }
 
-    private var tSquat: CGFloat = 0, cSquat: CGFloat = 0
-    private var tEar: CGFloat = 0, cEar: CGFloat = 0
-    private var tGesture: CGFloat = 0, cGesture: CGFloat = 0
-    private var tNarrow: CGFloat = 0, cNarrow: CGFloat = 0   // eyes narrowed (focus)
-    private var tTilt: CGFloat = 0, cTilt: CGFloat = 0
-    private var tMouth: CGFloat = 0, cMouth: CGFloat = 0
-
-    private var bobPhase: CGFloat = 0
-    private var gesturePhase: CGFloat = 0
-    private var appearPos: CGFloat = 0, appearVel: CGFloat = 0
-    private var timer: Timer?
-
-    // Line-art palette: deep navy contour, warm gold + orange accents (as in the reference).
-    private let navy   = NSColor(calibratedRed: 0.10, green: 0.22, blue: 0.42, alpha: 1)
-    private let gold   = NSColor(calibratedRed: 0.86, green: 0.64, blue: 0.20, alpha: 1)
-    private let orange = NSColor(calibratedRed: 0.87, green: 0.42, blue: 0.18, alpha: 1)
+/// Hosts the 3D particle-Sumo (Three.js / WebGL) in a transparent WKWebView, so it simply appears on
+/// the desktop when Jarvis wakes. The scene is static (no motion) by request. Three.js is loaded from
+/// a CDN — the app already needs the network for Claude — so if the Mac is offline the particles
+/// won't load (the labels below still work).
+final class SumoWebView: NSView {
+    private let webView: WKWebView
 
     override init(frame frameRect: NSRect) {
+        let config = WKWebViewConfiguration()
+        webView = WKWebView(frame: .zero, configuration: config)
         super.init(frame: frameRect)
         wantsLayer = true
-        startLoop()
+
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        // Transparent background so only the glowing particles show over the desktop.
+        webView.setValue(false, forKey: "drawsBackground")
+        webView.layer?.backgroundColor = NSColor.clear.cgColor
+        addSubview(webView)
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            webView.topAnchor.constraint(equalTo: topAnchor),
+            webView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+        webView.loadHTMLString(Self.html, baseURL: URL(string: "https://sumo.local/"))
     }
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        wantsLayer = true
-        startLoop()
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // The scene is static, so pose/level/appear are intentionally no-ops (kept for a stable API).
+    func setPose(_ pose: SumoPose) {}
+    func setLevel(_ level: Float) {}
+    func playAppear() {}
+
+    /// Force a repaint — a WebGL context may not draw while its window is hidden, so we nudge it
+    /// each time the overlay is shown.
+    func refresh() {
+        webView.evaluateJavaScript("window.__render && window.__render()", completionHandler: nil)
     }
-    deinit { timer?.invalidate() }
 
-    override var isFlipped: Bool { false }
+    /// The user's particle-Sumo scene, adapted for a transparent, static desktop overlay:
+    /// working Three.js (r128) CDN, alpha renderer, no fog/grid/controls, no animation.
+    private static let html = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      html,body { margin:0; height:100%; overflow:hidden; background:transparent; }
+      canvas { display:block; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    </head>
+    <body>
+    <script>
+      if (window.THREE) {
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 4, 16);
+        camera.lookAt(0, 4, 0);
 
-    // MARK: - API
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setClearColor(0x000000, 0); // transparent
+        document.body.appendChild(renderer.domElement);
 
-    func setPose(_ pose: Pose) {
-        switch pose {
-        case .listening: tSquat = 0; tEar = 1; tGesture = 0; tNarrow = 0.35; tTilt = 0.13
-        case .thinking:  tSquat = 1; tEar = 0; tGesture = 0; tNarrow = 0.75; tTilt = 0
-        case .speaking:  tSquat = 0; tEar = 0; tGesture = 1; tNarrow = 0.2;  tTilt = 0
+        const particleCount = 45000;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+        const colorCore = new THREE.Color('#e06600');
+        const colorSkin = new THREE.Color('#ffcc99');
+        const colorShadow = new THREE.Color('#331a00');
+        let index = 0;
+
+        for (let i = 0; i < particleCount; i++) {
+          let x = 0, y = 0, z = 0;
+          let mixedColor = colorSkin;
+          const randType = Math.random();
+          if (randType < 0.35) {
+            const u = Math.random(), v = Math.random();
+            const theta = u * 2.0 * Math.PI;
+            const phi = Math.acos(2.0 * v - 1.0);
+            const rX = 2.4 + Math.random() * 0.4;
+            const rY = 2.0 + Math.random() * 0.3;
+            const rZ = 2.2 + Math.random() * 0.4;
+            x = rX * Math.sin(phi) * Math.cos(theta);
+            y = rY * Math.cos(phi) + 4.5;
+            z = rZ * Math.sin(phi) * Math.sin(theta);
+            mixedColor = colorCore.clone().lerp(colorSkin, Math.random() * 0.6);
+          } else if (randType < 0.70) {
+            const side = Math.random() < 0.5 ? -1 : 1;
+            const t = Math.random() * Math.PI;
+            x = side * (2.5 + Math.sin(t) * 1.8 + (Math.random() - 0.5) * 0.6);
+            y = Math.cos(t) * 2.0 + 2.0 + (Math.random() - 0.5) * 0.6;
+            z = Math.sin(t) * 1.2 + (Math.random() - 0.5) * 0.8;
+            mixedColor = colorSkin.clone().lerp(colorShadow, Math.random() * 0.4);
+          } else if (randType < 0.90) {
+            const side = Math.random() < 0.5 ? -1 : 1;
+            const progress = Math.random();
+            x = side * (2.0 - progress * 0.8) + (Math.random() - 0.5) * 0.4;
+            y = (5.5 - progress * 3.5) + (Math.random() - 0.5) * 0.4;
+            z = 1.5 + Math.sin(progress * Math.PI) * 0.5 + (Math.random() - 0.5) * 0.4;
+            mixedColor = colorSkin;
+          } else {
+            const theta = Math.random() * 2.0 * Math.PI;
+            const phi = Math.acos(2.0 * Math.random() - 1.0);
+            const r = 0.8 + Math.random() * 0.2;
+            x = r * Math.sin(phi) * Math.cos(theta);
+            y = r * Math.cos(phi) + 7.2;
+            z = r * Math.sin(phi) * Math.sin(theta) - 0.1;
+            mixedColor = (y > 7.6) ? new THREE.Color('#111111') : colorSkin;
+          }
+          positions[index] = x; positions[index + 1] = y; positions[index + 2] = z;
+          colors[index] = mixedColor.r; colors[index + 1] = mixedColor.g; colors[index + 2] = mixedColor.b;
+          index += 3;
         }
-    }
-    func setLevel(_ level: Float) { tMouth = CGFloat(min(max(level, 0), 1)) }
-    func playAppear() { appearPos = 0; appearVel = 0 }
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-    // MARK: - Loop
+        const createParticleTexture = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 16; canvas.height = 16;
+          const c = canvas.getContext('2d');
+          const grad = c.createRadialGradient(8, 8, 0, 8, 8, 8);
+          grad.addColorStop(0, 'rgba(255,255,255,1)');
+          grad.addColorStop(1, 'rgba(255,255,255,0)');
+          c.fillStyle = grad; c.fillRect(0, 0, 16, 16);
+          return new THREE.CanvasTexture(canvas);
+        };
+        const material = new THREE.PointsMaterial({
+          size: 0.08, map: createParticleTexture(), vertexColors: true,
+          transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+        });
+        const particleSystem = new THREE.Points(geometry, material);
+        scene.add(particleSystem);
 
-    private func startLoop() {
-        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.step() }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-    }
-
-    private func step() {
-        let dt: CGFloat = 1.0 / 30.0
-        bobPhase += dt * 2.0
-        gesturePhase += dt * 7.0
-        cSquat   += (tSquat - cSquat) * 0.16
-        cEar     += (tEar - cEar) * 0.18
-        cGesture += (tGesture - cGesture) * 0.15
-        cNarrow  += (tNarrow - cNarrow) * 0.2
-        cTilt    += (tTilt - cTilt) * 0.18
-        cMouth   += (tMouth - cMouth) * 0.45
-        tMouth   *= 0.86
-        let force = (1 - appearPos) * 180 - appearVel * 14
-        appearVel += force * dt
-        appearPos += appearVel * dt
-        needsDisplay = true
-    }
-
-    // MARK: - Drawing (strokes only)
-
-    override func draw(_ dirtyRect: NSRect) {
-        let w = bounds.width, h = bounds.height
-        let u = min(w, h)
-        let cx = w / 2
-        let footY = h * 0.14
-        let alpha = max(0, min(1, appearPos * 1.3))
-        let scale = 0.64 + 0.36 * appearPos
-        let bob = sin(bobPhase) * u * 0.010 * (1 - cSquat)
-        let lw = u * 0.016
-        let aw = u * 0.010
-
-        NSGraphicsContext.saveGraphicsState()
-        let xf = NSAffineTransform()
-        xf.translateX(by: cx, yBy: footY)
-        xf.scale(by: scale)
-        xf.translateX(by: -cx, yBy: -footY)
-        xf.concat()
-
-        let sink = cSquat * u * 0.14
-
-        // Ground platform ring.
-        stroke(oval(cx - u*0.34, footY - u*0.05, u*0.68, u*0.11), navy, lw*0.8, alpha)
-
-        // Hips / body anchor.
-        let hipY = footY + u*0.16 - sink*0.2
-        let torsoBottom = hipY + u*0.02
-        let torsoW = u*0.52 * (1 + cSquat*0.12)
-        let torsoH = u*0.40
-        let torsoCX = cx
-        let torsoCY = torsoBottom + torsoH/2 - sink*0.4
-
-        // Legs (squat when thinking, stand otherwise).
-        drawLegs(cx: cx, hipY: hipY, footY: footY, u: u, squat: cSquat, lw: lw, alpha: alpha)
-
-        // Torso outline.
-        stroke(oval(torsoCX - torsoW/2, torsoBottom - sink*0.4, torsoW, torsoH), navy, lw, alpha)
-        // Accent contours (pecs + belly), the neon-linework look.
-        let pecY = torsoCY + torsoH*0.12
-        stroke(arcPath(cx: torsoCX - torsoW*0.20, cy: pecY, r: torsoW*0.16, a0: 200, a1: 340), gold, aw, alpha)
-        stroke(arcPath(cx: torsoCX + torsoW*0.20, cy: pecY, r: torsoW*0.16, a0: 200, a1: 340), gold, aw, alpha)
-        stroke(arcPath(cx: torsoCX, cy: torsoCY - torsoH*0.06, r: torsoW*0.22, a0: 205, a1: 335), orange, aw, alpha)
-
-        // Mawashi belt.
-        let beltY = torsoBottom - sink*0.4 + torsoH*0.04
-        let beltH = torsoH*0.20
-        stroke(roundedRect(torsoCX - torsoW*0.54, beltY, torsoW*1.08, beltH, beltH*0.4), navy, lw, alpha)
-        // Front flap with a gold zig-zag accent.
-        stroke(roundedRect(torsoCX - torsoW*0.10, beltY - beltH*0.55, torsoW*0.20, beltH*1.4, torsoW*0.04), navy, lw*0.8, alpha)
-        stroke(zigzag(cx: torsoCX, top: beltY - beltH*0.4, w: torsoW*0.12, h: beltH*1.1, steps: 3), gold, aw, alpha)
-
-        // Arms.
-        let shoulderY = torsoCY + torsoH*0.30
-        let swing = sin(gesturePhase) * 0.5 * cGesture
-        drawArm(sx: torsoCX - torsoW*0.46, sy: shoulderY, side: -1, u: u, squat: cSquat, ear: 0, gesture: swing, lw: lw, alpha: alpha, hipY: hipY, cx: cx)
-        drawArm(sx: torsoCX + torsoW*0.46, sy: shoulderY, side: 1, u: u, squat: cSquat, ear: cEar, gesture: -swing, lw: lw, alpha: alpha, hipY: hipY, cx: cx)
-
-        // Head.
-        let headR = u*0.155
-        let lean = cEar * u*0.05
-        let headCX = cx + lean
-        let headCY = torsoCY + torsoH/2 + headR*0.5 - sink*0.4 + bob
-        drawHead(cx: headCX, cy: headCY, r: headR, lw: lw, aw: aw, alpha: alpha)
-
-        // Cupped hand at the ear when listening.
-        if cEar > 0.02 {
-            let hx = headCX + headR*1.05, hy = headCY + headR*0.02
-            stroke(oval(hx - headR*0.30, hy - headR*0.34, headR*0.6, headR*0.72), navy, lw*0.9, alpha*cEar)
+        // Static: render once, and again only on resize or when the overlay reappears.
+        function render() {
+          if (window.innerWidth > 0) { renderer.setSize(window.innerWidth, window.innerHeight); }
+          renderer.render(scene, camera);
         }
-
-        NSGraphicsContext.restoreGraphicsState()
-    }
-
-    private func drawHead(cx: CGFloat, cy: CGFloat, r: CGFloat, lw: CGFloat, aw: CGFloat, alpha: CGFloat) {
-        NSGraphicsContext.saveGraphicsState()
-        let xf = NSAffineTransform()
-        xf.translateX(by: cx, yBy: cy); xf.rotate(byRadians: cTilt); xf.concat()
-
-        // Ears, face, topknot — all outlines.
-        stroke(oval(-r*1.04, -r*0.20, r*0.34, r*0.5), navy, lw*0.8, alpha)
-        stroke(oval(r*0.70, -r*0.20, r*0.34, r*0.5), navy, lw*0.8, alpha)
-        stroke(oval(-r, -r, r*2, r*2), navy, lw, alpha)
-        stroke(oval(-r*0.66, r*0.62, r*1.32, r*0.7), navy, lw*0.8, alpha)   // hairline cap
-        stroke(oval(-r*0.22, r*1.02, r*0.44, r*0.42), navy, lw*0.8, alpha)  // topknot
-        stroke(linePath(from: NSPoint(x: -r*0.22, y: r*1.16), to: NSPoint(x: r*0.22, y: r*1.16)), navy, lw*0.7, alpha)
-
-        // Angry eyebrows — thick strokes slanting down toward the nose.
-        let browY = r*0.30
-        stroke(linePath(from: NSPoint(x: -r*0.66, y: browY + r*0.10), to: NSPoint(x: -r*0.16, y: browY - r*0.10)), navy, lw*1.1, alpha)
-        stroke(linePath(from: NSPoint(x: r*0.66, y: browY + r*0.10), to: NSPoint(x: r*0.16, y: browY - r*0.10)), navy, lw*1.1, alpha)
-
-        // Angry eyes — narrowed slits under the brows (an orange glint).
-        let eyeY = r*0.06
-        let open = (1 - cNarrow)
-        let eyeH = r*0.16 * (0.35 + 0.65*open)
-        for sgn in [-CGFloat(1), 1] {
-            let ex = sgn * r*0.40
-            stroke(linePath(from: NSPoint(x: ex - r*0.20, y: eyeY + eyeH), to: NSPoint(x: ex + r*0.20, y: eyeY + eyeH*0.2)), navy, lw*0.9, alpha)
-            stroke(linePath(from: NSPoint(x: ex - r*0.20, y: eyeY - eyeH*0.4), to: NSPoint(x: ex + r*0.20, y: eyeY - eyeH*0.4)), navy, lw*0.7, alpha)
-            stroke(linePath(from: NSPoint(x: ex - r*0.10, y: eyeY), to: NSPoint(x: ex + r*0.12, y: eyeY)), orange, aw, alpha)
-        }
-
-        // Frown / mouth — opens with the voice while speaking; a hard frown otherwise.
-        let my = -r*0.44
-        let openM = cMouth
-        if openM > 0.05 {
-            stroke(oval(-r*0.26, my - (r*0.10 + r*0.5*openM)/2, r*0.52, r*0.10 + r*0.5*openM), navy, lw*0.9, alpha)
-        } else {
-            stroke(curvePath(from: NSPoint(x: -r*0.28, y: my - r*0.06),
-                             to: NSPoint(x: r*0.28, y: my - r*0.06),
-                             c1: NSPoint(x: -r*0.08, y: my + r*0.10),
-                             c2: NSPoint(x: r*0.08, y: my + r*0.10)), navy, lw*0.9, alpha)
-        }
-
-        NSGraphicsContext.restoreGraphicsState()
-    }
-
-    private func drawArm(sx: CGFloat, sy: CGFloat, side: CGFloat, u: CGFloat, squat: CGFloat,
-                         ear: CGFloat, gesture: CGFloat, lw: CGFloat, alpha: CGFloat, hipY: CGFloat, cx: CGFloat) {
-        // Hand target: at the ear (listening), on the knee (squat), or gesturing/at side.
-        let elbow = NSPoint(x: sx + side*u*0.10, y: sy - u*0.14 - gesture*u*0.10)
-        var hand: NSPoint
-        if ear > 0.5 {
-            hand = NSPoint(x: cx + side*u*0.14, y: sy + u*0.10)         // up toward the ear
-        } else if squat > 0.5 {
-            hand = NSPoint(x: cx + side*u*0.22, y: hipY - u*0.02)       // resting on the knee
-        } else {
-            hand = NSPoint(x: sx + side*u*0.06 + gesture*u*0.14, y: sy - u*0.30 + gesture*u*0.06)
-        }
-        let arm = NSBezierPath()
-        arm.move(to: NSPoint(x: sx, y: sy))
-        arm.line(to: elbow)
-        arm.line(to: hand)
-        stroke(arm, navy, lw, alpha)
-        stroke(oval(hand.x - u*0.05, hand.y - u*0.05, u*0.10, u*0.10), navy, lw*0.8, alpha)  // fist/hand
-    }
-
-    private func drawLegs(cx: CGFloat, hipY: CGFloat, footY: CGFloat, u: CGFloat, squat: CGFloat, lw: CGFloat, alpha: CGFloat) {
-        for sgn in [-CGFloat(1), 1] {
-            let hip = NSPoint(x: cx + sgn*u*0.12, y: hipY)
-            let knee = NSPoint(x: cx + sgn*(u*0.14 + squat*u*0.16), y: hipY - u*0.10 + squat*u*0.05)
-            let foot = NSPoint(x: cx + sgn*(u*0.10 + squat*u*0.04), y: footY)
-            let leg = NSBezierPath()
-            leg.move(to: hip); leg.line(to: knee); leg.line(to: foot)
-            stroke(leg, navy, lw, alpha)
-            stroke(oval(foot.x - u*0.07, footY - u*0.02, u*0.14, u*0.05), navy, lw*0.8, alpha)  // foot
-        }
-    }
-
-    // MARK: - Stroke helpers
-
-    private func stroke(_ path: NSBezierPath, _ color: NSColor, _ width: CGFloat, _ alpha: CGFloat) {
-        color.withAlphaComponent(alpha).setStroke()
-        path.lineWidth = width
-        path.lineJoinStyle = .round
-        path.lineCapStyle = .round
-        path.stroke()
-    }
-    private func oval(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> NSBezierPath {
-        NSBezierPath(ovalIn: NSRect(x: x, y: y, width: w, height: h))
-    }
-    private func roundedRect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ r: CGFloat) -> NSBezierPath {
-        NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h), xRadius: r, yRadius: r)
-    }
-    private func linePath(from a: NSPoint, to b: NSPoint) -> NSBezierPath {
-        let p = NSBezierPath(); p.move(to: a); p.line(to: b); return p
-    }
-    private func curvePath(from a: NSPoint, to b: NSPoint, c1: NSPoint, c2: NSPoint) -> NSBezierPath {
-        let p = NSBezierPath(); p.move(to: a); p.curve(to: b, controlPoint1: c1, controlPoint2: c2); return p
-    }
-    private func arcPath(cx: CGFloat, cy: CGFloat, r: CGFloat, a0: CGFloat, a1: CGFloat) -> NSBezierPath {
-        let p = NSBezierPath(); p.appendArc(withCenter: NSPoint(x: cx, y: cy), radius: r, startAngle: a0, endAngle: a1); return p
-    }
-    private func zigzag(cx: CGFloat, top: CGFloat, w: CGFloat, h: CGFloat, steps: Int) -> NSBezierPath {
-        let p = NSBezierPath()
-        p.move(to: NSPoint(x: cx - w/2, y: top))
-        let dy = h / CGFloat(steps)
-        for i in 0..<steps {
-            let y = top - dy*CGFloat(i) - dy/2
-            p.line(to: NSPoint(x: cx + (i % 2 == 0 ? w/2 : -w/2), y: y))
-        }
-        return p
-    }
+        window.__render = render;
+        render();
+        window.addEventListener('resize', () => {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          render();
+        });
+      }
+    </script>
+    </body>
+    </html>
+    """
 }
 
 /// A Siri-style floating window — transparent background so Sumo simply appears on the desktop.
 /// Floats above everything, never takes focus, passes clicks through.
 final class HUDWindowController {
     private let panel: NSPanel
-    private let sumo = SumoView(frame: NSRect(x: 0, y: 0, width: 160, height: 160))
+    private let sumo = SumoWebView(frame: NSRect(x: 0, y: 0, width: 240, height: 240))
     private let statusLabel = NSTextField(labelWithString: "")
     private let messageLabel: NSTextField
     private var pendingHide: DispatchWorkItem?
 
     init() {
-        let size = NSSize(width: 380, height: 260)
+        let size = NSSize(width: 400, height: 340)
         panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -318,13 +216,13 @@ final class HUDWindowController {
         let stack = NSStackView(views: [sumo, statusLabel, messageLabel])
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = 8
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            sumo.widthAnchor.constraint(equalToConstant: 160),
-            sumo.heightAnchor.constraint(equalToConstant: 160),
+            sumo.widthAnchor.constraint(equalToConstant: 240),
+            sumo.heightAnchor.constraint(equalToConstant: 240),
             stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 16),
@@ -344,17 +242,17 @@ final class HUDWindowController {
     }
     func setLevel(_ level: Float) { sumo.setLevel(level) }
 
-    private func present(status: String, message: String, pose: SumoView.Pose) {
+    private func present(status: String, message: String, pose: SumoPose) {
         pendingHide?.cancel(); pendingHide = nil
         statusLabel.stringValue = status
         messageLabel.stringValue = message
         messageLabel.isHidden = message.isEmpty
         sumo.setPose(pose)
-        if panel.alphaValue < 0.5 { sumo.playAppear() }
         positionPanel()
         panel.orderFrontRegardless()
+        sumo.refresh()  // WebGL may need a nudge to paint once the window is on screen
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
+            ctx.duration = 0.2
             panel.animator().alphaValue = 1
         }
     }
@@ -379,7 +277,7 @@ final class HUDWindowController {
         guard let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
         let s = panel.frame.size
-        panel.setFrameOrigin(NSPoint(x: visible.midX - s.width / 2, y: visible.minY + 120))
+        panel.setFrameOrigin(NSPoint(x: visible.midX - s.width / 2, y: visible.minY + 110))
     }
 }
 
