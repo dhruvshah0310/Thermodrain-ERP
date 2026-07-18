@@ -1,204 +1,299 @@
 import AppKit
-import QuartzCore
 
-/// Iron-Man-style arc-reactor graphic, drawn with Core Animation layers: a glowing core, an outer
-/// ring, and a rotating ring of coil segments. It has three "moods" that change color and energy so
-/// you can tell at a glance whether Jarvis is listening, thinking, or speaking.
-final class ArcReactorView: NSView {
-    enum Mood { case listening, thinking, speaking }
+/// Sumo — Thermodrain's mascot — drawn procedurally so he can act out what Jarvis is doing:
+///   • listening  → leans in and cups a hand to his ear
+///   • thinking    → sinks into a cross-legged meditation pose, eyes closed
+///   • speaking    → mouth moves in time with Jarvis's voice while his hands gesture
+/// He also springs in with a little bounce when he appears. All state is a set of eased parameters
+/// advanced by a ~30 fps timer; `draw(_:)` renders the current pose from them, so pose changes are
+/// just smooth interpolations rather than a rigged layer tree.
+final class SumoView: NSView {
+    enum Pose { case listening, thinking, speaking }
 
-    private let glowLayer = CAGradientLayer()
-    private let coreLayer = CAGradientLayer()
-    private let outerRing = CAShapeLayer()
-    private let innerRing = CAShapeLayer()
-    private let coils = CAReplicatorLayer()
-    private let coilSeed = CAShapeLayer()
+    // Targets set by the current pose; `cur*` values ease toward them each frame.
+    private var tSeated: CGFloat = 0, curSeated: CGFloat = 0
+    private var tEar: CGFloat = 0, curEar: CGFloat = 0
+    private var tGesture: CGFloat = 0, curGesture: CGFloat = 0
+    private var tEyesClosed: CGFloat = 0, curEyesClosed: CGFloat = 0
+    private var tTilt: CGFloat = 0, curTilt: CGFloat = 0
+    private var tMouth: CGFloat = 0, curMouth: CGFloat = 0   // 0…1 mouth openness (voice level)
 
-    private let coilCount = 12
+    private var bobPhase: CGFloat = 0
+    private var gesturePhase: CGFloat = 0
 
-    // Live-glow state, updated ~30×/s by a timer so the core can react to microphone loudness while
-    // still gently "breathing" in silence.
-    private var targetLevel: CGFloat = 0     // most recent mic loudness, 0…1
-    private var displayLevel: CGFloat = 0    // eased value actually rendered
-    private var breathePhase: CGFloat = 0
-    private var breatheSpeed: CGFloat = 3.0  // set per mood
-    private var levelGain: CGFloat = 0.9     // how strongly the mic drives the glow, per mood
-    private var levelTimer: Timer?
+    // Entrance spring (bouncy pop-in).
+    private var appearPos: CGFloat = 0, appearVel: CGFloat = 0
+
+    private var timer: Timer?
+
+    // Palette — Thermodrain steel-blue mawashi against warm skin.
+    private let skin      = NSColor(calibratedRed: 0.95, green: 0.80, blue: 0.66, alpha: 1)
+    private let skinShade = NSColor(calibratedRed: 0.86, green: 0.68, blue: 0.53, alpha: 1)
+    private let belt      = NSColor(calibratedRed: 0.11, green: 0.36, blue: 0.62, alpha: 1)
+    private let beltDark  = NSColor(calibratedRed: 0.07, green: 0.26, blue: 0.47, alpha: 1)
+    private let hair      = NSColor(calibratedRed: 0.16, green: 0.14, blue: 0.15, alpha: 1)
+    private let mouthCol  = NSColor(calibratedRed: 0.45, green: 0.16, blue: 0.16, alpha: 1)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.masksToBounds = false
-        buildLayers()
-        setMood(.listening)
+        startLoop()
     }
-
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
-        buildLayers()
-        setMood(.listening)
+        startLoop()
+    }
+    deinit { timer?.invalidate() }
+
+    override var isFlipped: Bool { false }  // y-up: feet at the bottom
+
+    // MARK: - Public API
+
+    func setPose(_ pose: Pose) {
+        switch pose {
+        case .listening: tSeated = 0; tEar = 1; tGesture = 0; tEyesClosed = 0; tTilt = 0.14
+        case .thinking:  tSeated = 1; tEar = 0; tGesture = 0; tEyesClosed = 1; tTilt = 0
+        case .speaking:  tSeated = 0; tEar = 0; tGesture = 1; tEyesClosed = 0; tTilt = 0
+        }
     }
 
-    override var isFlipped: Bool { true }
-
-    private func buildLayers() {
-        glowLayer.type = .radial
-        glowLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        glowLayer.endPoint = CGPoint(x: 1, y: 1)
-        layer?.addSublayer(glowLayer)
-
-        outerRing.fillColor = NSColor.clear.cgColor
-        outerRing.lineWidth = 2
-        layer?.addSublayer(outerRing)
-
-        coilSeed.lineCap = .round
-        coils.instanceCount = coilCount
-        coils.addSublayer(coilSeed)
-        layer?.addSublayer(coils)
-
-        innerRing.fillColor = NSColor.clear.cgColor
-        innerRing.lineWidth = 1.5
-        layer?.addSublayer(innerRing)
-
-        coreLayer.type = .radial
-        coreLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        coreLayer.endPoint = CGPoint(x: 1, y: 1)
-        layer?.addSublayer(coreLayer)
-
-        addRotation()
-        startGlowLoop()
-    }
-
-    deinit { levelTimer?.invalidate() }
-
-    override func layout() {
-        super.layout()
-        let b = bounds
-        let center = CGPoint(x: b.midX, y: b.midY)
-        let r = min(b.width, b.height) / 2
-
-        glowLayer.frame = b.insetBy(dx: -r * 0.4, dy: -r * 0.4)
-        glowLayer.cornerRadius = glowLayer.frame.width / 2
-
-        outerRing.frame = b
-        outerRing.path = CGPath(ellipseIn: b.insetBy(dx: r * 0.06, dy: r * 0.06), transform: nil)
-
-        innerRing.frame = b
-        innerRing.path = CGPath(ellipseIn: b.insetBy(dx: r * 0.52, dy: r * 0.52), transform: nil)
-
-        // Coil ring: one short segment near the top, replicated in a circle about the center.
-        coils.frame = b
-        coils.instanceCount = coilCount
-        coils.instanceTransform = CATransform3DMakeRotation(2 * .pi / CGFloat(coilCount), 0, 0, 1)
-        coilSeed.frame = b
-        let segW = r * 0.14
-        let segTop = r * 0.16
-        let segBottom = r * 0.42
-        let seg = CGMutablePath()
-        seg.addRoundedRect(
-            in: CGRect(x: center.x - segW / 2, y: segTop, width: segW, height: segBottom - segTop),
-            cornerWidth: segW / 2, cornerHeight: segW / 2
-        )
-        coilSeed.path = seg
-
-        let coreInset = r * 0.66
-        coreLayer.frame = b.insetBy(dx: coreInset, dy: coreInset)
-        coreLayer.cornerRadius = coreLayer.frame.width / 2
-    }
-
-    private func addRotation() {
-        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-        spin.fromValue = 0
-        spin.toValue = 2 * Double.pi
-        spin.duration = 8
-        spin.repeatCount = .infinity
-        coils.add(spin, forKey: "spin")
-    }
-
-    /// Feed the latest microphone loudness (0…1). Smoothed and rendered by the glow loop, so louder
-    /// speech drives a brighter, larger core.
+    /// Voice loudness (0…1) → mouth openness while speaking.
     func setLevel(_ level: Float) {
-        targetLevel = CGFloat(min(max(level, 0), 1))
+        tMouth = CGFloat(min(max(level, 0), 1))
     }
 
-    /// A ~30 fps timer that eases the displayed level toward the live mic level and combines it with
-    /// a slow "breathing" so the reactor stays alive in silence. Drives the core scale + glow/shadow
-    /// opacities directly (implicit layer animations disabled so each frame lands immediately).
-    private func startGlowLoop() {
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.stepGlow()
+    /// Kick off the bouncy entrance (call each time he's shown).
+    func playAppear() {
+        appearPos = 0
+        appearVel = 0
+    }
+
+    // MARK: - Animation loop
+
+    private func startLoop() {
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.step() }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func step() {
+        let dt: CGFloat = 1.0 / 30.0
+        bobPhase += dt * 2.2
+        gesturePhase += dt * 7.0
+
+        // Ease pose parameters.
+        curSeated     += (tSeated - curSeated) * 0.16
+        curEar        += (tEar - curEar) * 0.18
+        curGesture    += (tGesture - curGesture) * 0.15
+        curEyesClosed += (tEyesClosed - curEyesClosed) * 0.25
+        curTilt       += (tTilt - curTilt) * 0.18
+        curMouth      += (tMouth - curMouth) * 0.4
+        tMouth        *= 0.90  // sag when no fresh audio arrives
+
+        // Entrance spring toward 1 with overshoot.
+        let stiffness: CGFloat = 180, damping: CGFloat = 14
+        let force = (1 - appearPos) * stiffness - appearVel * damping
+        appearVel += force * dt
+        appearPos += appearVel * dt
+
+        needsDisplay = true
+    }
+
+    // MARK: - Drawing
+
+    override func draw(_ dirtyRect: NSRect) {
+        let w = bounds.width, h = bounds.height
+        let u = min(w, h)
+        let cx = w / 2
+        let footY = h * 0.16
+        let alpha = max(0, min(1, appearPos * 1.3))
+        let scale = 0.62 + 0.38 * appearPos           // springs slightly past 1
+        let bob = sin(bobPhase) * u * 0.012 * (1 - curSeated)
+
+        // Entrance transform: scale about the feet.
+        NSGraphicsContext.saveGraphicsState()
+        let xf = NSAffineTransform()
+        xf.translateX(by: cx, yBy: footY)
+        xf.scale(by: scale)
+        xf.translateX(by: -cx, yBy: -footY)
+        xf.concat()
+
+        let sink = curSeated * u * 0.16               // whole body lowers when meditating
+        let spread = 1 + curSeated * 0.28             // and widens at the base
+
+        // Ground shadow.
+        let shW = u * 0.5 * spread, shH = u * 0.07
+        fill(oval(cx - shW/2, footY - shH*0.3, shW, shH), NSColor.black.withAlphaComponent(0.16 * alpha))
+
+        // Legs / seated base.
+        drawLegs(cx: cx, footY: footY, u: u, seated: curSeated, alpha: alpha)
+
+        // Body (belly).
+        let bellyW = u * 0.60 * spread
+        let bellyH = u * 0.46
+        let bellyBottom = footY + u * 0.09 - sink * 0.2
+        let bellyCX = cx
+        let bellyCY = bellyBottom + bellyH / 2
+        fill(oval(bellyCX - bellyW/2, bellyBottom, bellyW, bellyH), skin.withAlphaComponent(alpha))
+        // Soft belly shading.
+        fill(oval(bellyCX - bellyW*0.30, bellyBottom + bellyH*0.10, bellyW*0.34, bellyH*0.5),
+             skinShade.withAlphaComponent(0.35 * alpha))
+
+        // Mawashi (belt).
+        let beltY = bellyBottom + bellyH * 0.06
+        let beltH = bellyH * 0.26
+        fill(roundedRect(bellyCX - bellyW*0.52, beltY, bellyW*1.04, beltH, beltH*0.35),
+             belt.withAlphaComponent(alpha))
+        fill(roundedRect(bellyCX - bellyW*0.10, beltY - beltH*0.35, bellyW*0.20, beltH*1.35, bellyW*0.05),
+             beltDark.withAlphaComponent(alpha))  // front flap
+
+        // Arms (behind head, gesture while speaking; rest on knees when seated).
+        let shoulderY = bellyCY + bellyH * 0.16
+        let g = curGesture
+        let swing = sin(gesturePhase) * 0.5 * g
+        let leftArmAngle:  CGFloat = 0.5 + swing + curSeated * 0.35
+        let rightArmAngle: CGFloat = -0.5 - swing - curSeated * 0.35 - curEar * 0.9
+        drawArm(shoulderX: bellyCX - bellyW*0.44, shoulderY: shoulderY, angle: leftArmAngle, u: u, alpha: alpha)
+        drawArm(shoulderX: bellyCX + bellyW*0.44, shoulderY: shoulderY, angle: rightArmAngle, u: u, alpha: alpha)
+
+        // Head (+ face), leaning forward when listening.
+        let headR = u * 0.165
+        let lean = curEar * u * 0.05
+        let headCX = cx + lean
+        let headCY = bellyCY + bellyH/2 + headR*0.62 - sink*0.4 + bob
+        drawHead(cx: headCX, cy: headCY, r: headR, alpha: alpha)
+
+        // Cupped hand at the ear when listening.
+        if curEar > 0.02 {
+            let hx = headCX + headR*1.02, hy = headCY + headR*0.05
+            fill(oval(hx - headR*0.34, hy - headR*0.34, headR*0.68, headR*0.72),
+                 skin.withAlphaComponent(alpha * curEar))
+            fill(oval(hx - headR*0.34, hy - headR*0.34, headR*0.68, headR*0.72).stroked(headR*0.10),
+                 skinShade.withAlphaComponent(0.5 * alpha * curEar))
         }
-        RunLoop.main.add(timer, forMode: .common)
-        levelTimer = timer
+
+        NSGraphicsContext.restoreGraphicsState()
     }
 
-    private func stepGlow() {
-        breathePhase += (1.0 / 30.0) * breatheSpeed
-        // Ease toward the target, and let the target sag when no fresh audio arrives.
-        displayLevel += (targetLevel - displayLevel) * 0.28
-        targetLevel *= 0.90
+    private func drawHead(cx: CGFloat, cy: CGFloat, r: CGFloat, alpha: CGFloat) {
+        NSGraphicsContext.saveGraphicsState()
+        let xf = NSAffineTransform()
+        xf.translateX(by: cx, yBy: cy)
+        xf.rotate(byRadians: curTilt)
+        xf.concat()
 
-        let breathe = 0.5 + 0.5 * sin(breathePhase)                // 0…1
-        let energy = min(1.0, breathe * 0.4 + displayLevel * levelGain)
+        // Face.
+        fill(oval(-r, -r, r*2, r*2), skin.withAlphaComponent(alpha))
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        let scale = 0.82 + 0.36 * energy
-        coreLayer.transform = CATransform3DMakeScale(scale, scale, 1)
-        coreLayer.opacity = Float(0.65 + 0.35 * energy)
-        glowLayer.opacity = Float(0.28 + 0.68 * energy)
-        outerRing.shadowOpacity = Float(0.4 + 0.55 * energy)
-        coilSeed.shadowOpacity = Float(0.35 + 0.55 * energy)
-        CATransaction.commit()
-    }
+        // Topknot (chonmage): a dark cap + a little knot on top.
+        fill(oval(-r*0.9, r*0.15, r*1.8, r*0.95), hair.withAlphaComponent(alpha))
+        fill(oval(-r*0.24, r*0.78, r*0.48, r*0.5), hair.withAlphaComponent(alpha))
+        // Ears.
+        fill(oval(-r*1.06, -r*0.18, r*0.36, r*0.5), skin.withAlphaComponent(alpha))
+        fill(oval(r*0.70, -r*0.18, r*0.36, r*0.5), skin.withAlphaComponent(alpha))
 
-    /// Switch color palette + energy for the current activity. Sets the coil spin speed and how much
-    /// the mic drives the glow: listening reacts most to your voice; thinking runs hotter on its own.
-    func setMood(_ mood: Mood) {
-        let tint: NSColor
-        let spinSpeed: Float
-        switch mood {
-        case .listening: tint = NSColor(calibratedRed: 0.36, green: 0.80, blue: 1.0, alpha: 1); spinSpeed = 1.0; breatheSpeed = 3.0; levelGain = 1.0
-        case .thinking:  tint = NSColor(calibratedRed: 0.42, green: 0.90, blue: 1.0, alpha: 1); spinSpeed = 2.4; breatheSpeed = 6.0; levelGain = 0.35
-        case .speaking:  tint = NSColor(calibratedRed: 0.30, green: 0.70, blue: 1.0, alpha: 1); spinSpeed = 1.6; breatheSpeed = 4.0; levelGain = 0.75
+        // Eyes — open (dots) or closed (arcs) by curEyesClosed.
+        let ex = r*0.42, ey = r*0.16, eo = 1 - curEyesClosed
+        if eo > 0.05 {
+            fill(oval(-ex - r*0.12, ey - r*0.12, r*0.24, r*0.24), hair.withAlphaComponent(alpha*eo))
+            fill(oval(ex - r*0.12, ey - r*0.12, r*0.24, r*0.24), hair.withAlphaComponent(alpha*eo))
+        }
+        if curEyesClosed > 0.05 {
+            strokeArc(cxp: -ex, cyp: ey, r: r*0.2, alpha: alpha*curEyesClosed)
+            strokeArc(cxp: ex, cyp: ey, r: r*0.2, alpha: alpha*curEyesClosed)
         }
 
-        let bright = tint.blended(withFraction: 0.55, of: .white) ?? tint
+        // Mouth — opens with the voice while speaking; a calm line otherwise.
+        let open = curMouth * (1 - curEyesClosed)
+        let my = -r*0.42
+        if open > 0.04 {
+            let mw = r*0.5, mh = r*0.15 + r*0.7*open
+            fill(oval(-mw/2, my - mh/2, mw, mh), mouthCol.withAlphaComponent(alpha))
+        } else {
+            let line = NSBezierPath()
+            line.lineWidth = r*0.09
+            line.lineCapStyle = .round
+            line.move(to: NSPoint(x: -r*0.26, y: my))
+            line.curve(to: NSPoint(x: r*0.26, y: my),
+                       controlPoint1: NSPoint(x: -r*0.05, y: my - r*0.14),
+                       controlPoint2: NSPoint(x: r*0.05, y: my - r*0.14))
+            mouthCol.withAlphaComponent(alpha).setStroke()
+            line.stroke()
+        }
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        outerRing.strokeColor = tint.withAlphaComponent(0.9).cgColor
-        outerRing.shadowColor = tint.cgColor
-        outerRing.shadowRadius = 8
-        outerRing.shadowOffset = .zero
-        innerRing.strokeColor = bright.withAlphaComponent(0.85).cgColor
-        coilSeed.fillColor = tint.withAlphaComponent(0.95).cgColor
-        coilSeed.strokeColor = NSColor.clear.cgColor
-        coilSeed.shadowColor = tint.cgColor
-        coilSeed.shadowRadius = 4
-        coilSeed.shadowOffset = .zero
-        coreLayer.colors = [bright.cgColor, tint.withAlphaComponent(0.7).cgColor, tint.withAlphaComponent(0.0).cgColor]
-        coreLayer.locations = [0, 0.5, 1]
-        glowLayer.colors = [tint.withAlphaComponent(0.55).cgColor, tint.withAlphaComponent(0.0).cgColor]
-        glowLayer.locations = [0, 1]
-        coils.speed = spinSpeed
-        CATransaction.commit()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawArm(shoulderX: CGFloat, shoulderY: CGFloat, angle: CGFloat, u: CGFloat, alpha: CGFloat) {
+        NSGraphicsContext.saveGraphicsState()
+        let xf = NSAffineTransform()
+        xf.translateX(by: shoulderX, yBy: shoulderY)
+        xf.rotate(byRadians: angle)
+        xf.concat()
+        let armW = u*0.16, armL = u*0.30
+        fill(roundedRect(-armW/2, -armL, armW, armL, armW/2), skin.withAlphaComponent(alpha))
+        fill(oval(-armW*0.55, -armL - armW*0.4, armW*1.1, armW*1.1), skin.withAlphaComponent(alpha)) // hand
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawLegs(cx: CGFloat, footY: CGFloat, u: CGFloat, seated: CGFloat, alpha: CGFloat) {
+        let stand = 1 - seated
+        if stand > 0.03 {
+            let legW = u*0.17, legH = u*0.14
+            fill(roundedRect(cx - u*0.20, footY - legH*0.1, legW, legH, legW*0.4), skin.withAlphaComponent(alpha*stand))
+            fill(roundedRect(cx + u*0.03, footY - legH*0.1, legW, legH, legW*0.4), skin.withAlphaComponent(alpha*stand))
+        }
+        if seated > 0.03 {
+            // Crossed-legs base: a wide low rounded mound.
+            let baseW = u*0.66, baseH = u*0.20
+            fill(roundedRect(cx - baseW/2, footY - baseH*0.2, baseW, baseH, baseH*0.5), skin.withAlphaComponent(alpha*seated))
+            fill(roundedRect(cx - baseW*0.30, footY + baseH*0.15, baseW*0.60, baseH*0.5, baseH*0.25),
+                 skinShade.withAlphaComponent(0.4*alpha*seated))  // fold shading
+        }
+    }
+
+    // MARK: - Shape helpers
+
+    private func fill(_ path: NSBezierPath, _ color: NSColor) { color.setFill(); path.fill() }
+    private func oval(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> NSBezierPath {
+        NSBezierPath(ovalIn: NSRect(x: x, y: y, width: w, height: h))
+    }
+    private func roundedRect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ r: CGFloat) -> NSBezierPath {
+        NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h), xRadius: r, yRadius: r)
+    }
+    private func strokeArc(cxp: CGFloat, cyp: CGFloat, r: CGFloat, alpha: CGFloat) {
+        let p = NSBezierPath()
+        p.lineWidth = r*0.28
+        p.lineCapStyle = .round
+        p.appendArc(withCenter: NSPoint(x: cxp, y: cyp), radius: r, startAngle: 200, endAngle: 340)
+        hair.withAlphaComponent(alpha).setStroke()
+        p.stroke()
     }
 }
 
-/// A Siri-style floating window: a rounded, blurred panel holding the arc reactor plus a status line
-/// and the current command / reply text. It floats above everything, never takes focus, and passes
-/// mouse clicks through, so it behaves like a heads-up overlay rather than a real window.
+private extension NSBezierPath {
+    /// A thin ring version of this path's bounds (used for a simple hand outline).
+    func stroked(_ width: CGFloat) -> NSBezierPath {
+        let r = bounds
+        let outer = NSBezierPath(ovalIn: r)
+        let inner = NSBezierPath(ovalIn: r.insetBy(dx: width, dy: width))
+        outer.append(inner.reversed)
+        return outer
+    }
+}
+
+/// A Siri-style floating window — now with a transparent background so Sumo simply appears on the
+/// desktop (no boxy panel). Floats above everything, never takes focus, passes clicks through.
 final class HUDWindowController {
     private let panel: NSPanel
-    private let reactor = ArcReactorView(frame: NSRect(x: 0, y: 0, width: 104, height: 104))
+    private let sumo = SumoView(frame: NSRect(x: 0, y: 0, width: 150, height: 150))
     private let statusLabel = NSTextField(labelWithString: "")
     private let messageLabel: NSTextField
     private var pendingHide: DispatchWorkItem?
 
     init() {
-        let size = NSSize(width: 360, height: 220)
+        let size = NSSize(width: 360, height: 250)
         panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -208,81 +303,88 @@ final class HUDWindowController {
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.isMovableByWindowBackground = false
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.alphaValue = 0
 
-        let visual = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-        visual.material = .hudWindow
-        visual.blendingMode = .behindWindow
-        visual.state = .active
-        visual.wantsLayer = true
-        visual.layer?.cornerRadius = 24
-        visual.layer?.masksToBounds = true
-        visual.autoresizingMask = [.width, .height]
+        // Plain transparent container — no blurred box.
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        container.autoresizingMask = [.width, .height]
+
+        // Legible over any wallpaper: white text with a soft dark shadow.
+        let textShadow = NSShadow()
+        textShadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
+        textShadow.shadowBlurRadius = 5
+        textShadow.shadowOffset = NSSize(width: 0, height: -1)
 
         statusLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.textColor = .white
         statusLabel.alignment = .center
+        statusLabel.wantsLayer = true
+        statusLabel.shadow = textShadow
 
         messageLabel = NSTextField(wrappingLabelWithString: "")
-        messageLabel.font = NSFont.systemFont(ofSize: 15, weight: .regular)
-        messageLabel.textColor = .labelColor
+        messageLabel.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        messageLabel.textColor = .white
         messageLabel.alignment = .center
         messageLabel.maximumNumberOfLines = 3
         messageLabel.lineBreakMode = .byTruncatingTail
-        messageLabel.preferredMaxLayoutWidth = size.width - 48
+        messageLabel.preferredMaxLayoutWidth = size.width - 40
+        messageLabel.wantsLayer = true
+        messageLabel.shadow = textShadow
 
-        reactor.translatesAutoresizingMaskIntoConstraints = false
+        sumo.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [reactor, statusLabel, messageLabel])
+        let stack = NSStackView(views: [sumo, statusLabel, messageLabel])
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = 12
+        stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
-        visual.addSubview(stack)
+        container.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            reactor.widthAnchor.constraint(equalToConstant: 104),
-            reactor.heightAnchor.constraint(equalToConstant: 104),
-            stack.centerXAnchor.constraint(equalTo: visual.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: visual.centerYAnchor),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: visual.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: visual.trailingAnchor, constant: -24)
+            sumo.widthAnchor.constraint(equalToConstant: 150),
+            sumo.heightAnchor.constraint(equalToConstant: 150),
+            stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -16)
         ])
 
-        panel.contentView = visual
+        panel.contentView = container
     }
 
     // MARK: - State transitions (call on the main thread)
 
     func showListening() {
-        present(status: "Listening…", message: "", mood: .listening)
+        present(status: "Listening…", message: "", pose: .listening)
     }
 
     func showThinking(_ command: String) {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        present(status: "Working on it…", message: trimmed.isEmpty ? "" : "“\(trimmed)”", mood: .thinking)
+        present(status: "Working on it…", message: trimmed.isEmpty ? "" : "“\(trimmed)”", pose: .thinking)
     }
 
     func showSpeaking(_ reply: String) {
-        present(status: "Jarvis", message: reply.trimmingCharacters(in: .whitespacesAndNewlines), mood: .speaking)
+        present(status: "Sumo", message: reply.trimmingCharacters(in: .whitespacesAndNewlines), pose: .speaking)
     }
 
-    /// Live microphone loudness (0…1) → the arc reactor's glow.
+    /// Live loudness (0…1) → Sumo's mouth.
     func setLevel(_ level: Float) {
-        reactor.setLevel(level)
+        sumo.setLevel(level)
     }
 
-    private func present(status: String, message: String, mood: ArcReactorView.Mood) {
+    private func present(status: String, message: String, pose: SumoView.Pose) {
         pendingHide?.cancel()
         pendingHide = nil
         statusLabel.stringValue = status
         messageLabel.stringValue = message
         messageLabel.isHidden = message.isEmpty
-        reactor.setMood(mood)
+        sumo.setPose(pose)
+        let wasHidden = panel.alphaValue < 0.5
+        if wasHidden { sumo.playAppear() }   // bounce in only when first appearing
         positionPanel()
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in
@@ -312,53 +414,24 @@ final class HUDWindowController {
         let visible = screen.visibleFrame
         let s = panel.frame.size
         let x = visible.midX - s.width / 2
-        let y = visible.minY + 130  // hover near the bottom, like Siri
+        let y = visible.minY + 120
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 }
 
-/// The menu-bar glyph: a small monochrome arc-reactor (a template image, so macOS tints it to match
-/// the menu bar). Used for the idle state so Jarvis reads as an Iron-Man-style reactor at a glance.
+/// The menu-bar glyph: a small monochrome Sumo silhouette (a template image, so macOS tints it).
 enum JarvisIcon {
-    static func reactor() -> NSImage {
+    static func sumo() -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
-            NSColor.black.setStroke()
-            let center = NSPoint(x: rect.midX, y: rect.midY)
-
-            let outer = NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1))
-            outer.lineWidth = 1.4
-            outer.stroke()
-
-            let inner = NSBezierPath(ovalIn: rect.insetBy(dx: 5.5, dy: 5.5))
-            inner.lineWidth = 1.1
-            inner.stroke()
-
-            // Spokes between the two rings.
-            let rIn = (rect.width / 2) - 5.5
-            let rOut = (rect.width / 2) - 1.5
-            for i in 0..<6 {
-                let a = CGFloat(i) * (.pi / 3)
-                let p1 = NSPoint(x: center.x + rIn * cos(a), y: center.y + rIn * sin(a))
-                let p2 = NSPoint(x: center.x + rOut * cos(a), y: center.y + rOut * sin(a))
-                let spoke = NSBezierPath()
-                spoke.move(to: p1)
-                spoke.line(to: p2)
-                spoke.lineWidth = 1.0
-                spoke.stroke()
-            }
-
-            // Reactor core triangle.
-            let tri = NSBezierPath()
-            let rc: CGFloat = 2.6
-            for i in 0..<3 {
-                let a = CGFloat(i) * (2 * .pi / 3) - .pi / 2
-                let p = NSPoint(x: center.x + rc * cos(a), y: center.y + rc * sin(a))
-                if i == 0 { tri.move(to: p) } else { tri.line(to: p) }
-            }
-            tri.close()
-            tri.lineWidth = 1.0
-            tri.stroke()
+            NSColor.black.setFill()
+            let w = rect.width, h = rect.height, cx = rect.midX
+            // Body.
+            NSBezierPath(ovalIn: NSRect(x: cx - w*0.34, y: h*0.10, width: w*0.68, height: h*0.55)).fill()
+            // Head.
+            NSBezierPath(ovalIn: NSRect(x: cx - w*0.20, y: h*0.52, width: w*0.40, height: h*0.40)).fill()
+            // Topknot.
+            NSBezierPath(ovalIn: NSRect(x: cx - w*0.07, y: h*0.84, width: w*0.14, height: h*0.13)).fill()
             return true
         }
         image.isTemplate = true

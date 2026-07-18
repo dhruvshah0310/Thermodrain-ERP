@@ -91,7 +91,7 @@ permanent location to point at:
 | `allowScreenControl` | On by default. Lets Jarvis take screenshots (see the screen) and control the mouse (click/scroll) — true "computer use." Needs Screen Recording + Accessibility permissions. |
 | `conversationMemoryTimeout` | Seconds of idle before Jarvis forgets the running conversation (default 180). The last ~6 turns are kept so follow-ups like "reply to him" / "open it" have context; after this gap the next command starts fresh. |
 | `verifyActions` | On by default. After blind keystroke actions (typing, key presses, pasting), nudges Claude to screenshot and confirm the effect before claiming success. Needs `allowScreenControl` to be useful. |
-| `showOverlay` | On by default. Shows a Siri-style floating window with an Iron-Man arc-reactor animation while Jarvis is listening, thinking, and speaking. Toggle from the menu (**Show Siri-style Window**); turn off for a pure menu-bar experience. |
+| `showOverlay` | On by default. Shows a Siri-style floating window with **Sumo** (Thermodrain's mascot) on a transparent background while Jarvis is listening, thinking, and speaking — he cups his ear to listen, meditates while thinking, and moves his mouth (to Jarvis's voice) and hands while speaking. Toggle from the menu (**Show Siri-style Window**); turn off for a pure menu-bar experience. |
 
 Restart the app after hand-editing the config file. `conversationMode`, `greetOnLaunch`, and the
 allow-flags also have menu bar toggles.

@@ -28,7 +28,7 @@ final class StatusBarController {
     init(assistant: JarvisController) {
         self.assistant = assistant
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = JarvisIcon.reactor()
+        statusItem.button?.image = JarvisIcon.sumo()
         buildMenu()
     }
 
@@ -38,7 +38,7 @@ final class StatusBarController {
         let image: NSImage?
         switch state {
         case .idleListening:
-            image = JarvisIcon.reactor()
+            image = JarvisIcon.sumo()
         case .capturing:
             image = NSImage(systemSymbolName: "mic.circle.fill", accessibilityDescription: "Jarvis capturing your command")
         case .thinking:
