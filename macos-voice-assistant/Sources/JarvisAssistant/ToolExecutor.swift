@@ -625,12 +625,11 @@ actor ToolExecutor {
     /// deleting any of these would be catastrophic and is never a legitimate voice command.
     private static let protectedDeletePaths: Set<String> = {
         let home = NSHomeDirectory()
-        var paths: Set<String> = [
+        return [
             "/", "/System", "/Library", "/Applications", "/usr", "/bin", "/sbin",
             "/etc", "/var", "/private", "/Users", "/opt", "/cores", "/Volumes",
             home, home + "/Library"
         ]
-        return paths
     }()
 
     /// Expand a leading ~ and standardize an absolute path. Returns nil for empty input.
