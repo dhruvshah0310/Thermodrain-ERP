@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis-voice"
+version = "2.0.0"
+description = "Jarvis — a smooth, Siri-class voice assistant for macOS, powered by Claude."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24",
+    "faster-whisper>=1.0.0",
+    "openwakeword>=0.6.0",
+    "webrtcvad-wheels>=2.0.14",
+    "pywebview>=5.0",
+    "websockets>=12.0",
+    "pynput>=1.7.6",
+    "onnxruntime>=1.17",
+]
+
+[project.optional-dependencies]
+macos = ["pyobjc-framework-Quartz>=10.0"]
+
+[project.scripts]
+jarvis = "jarvis.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["jarvis*"]
+
+[tool.setuptools.package-data]
+jarvis = ["ui/*.html"]

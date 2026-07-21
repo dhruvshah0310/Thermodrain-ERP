@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jarvis</title>
+<style>
+  :root {
+    --idle-a:#3a7bd5; --idle-b:#00d2ff;
+    --listen-a:#12c2e9; --listen-b:#64f0c4;
+    --think-a:#a044ff; --think-b:#6a3093;
+    --speak-a:#f7971e; --speak-b:#ffd200;
+    --error-a:#ff5f6d; --error-b:#ffc371;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; user-select:none; -webkit-user-select:none; }
+  html,body { width:100%; height:100%; background:transparent; overflow:hidden;
+              font-family:-apple-system,"SF Pro Display","Helvetica Neue",sans-serif; cursor:pointer; }
+  #stage { position:relative; width:100%; height:100%; display:flex;
+           flex-direction:column; align-items:center; justify-content:center; -webkit-app-region:drag; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; }
+  #caption {
+    position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+    max-width:86%; text-align:center; color:#eaf2ff; font-size:13px; line-height:1.35;
+    font-weight:500; letter-spacing:.2px; opacity:0; transition:opacity .35s ease;
+    text-shadow:0 1px 8px rgba(0,0,0,.55); pointer-events:none;
+    background:rgba(10,14,24,.42); padding:7px 14px; border-radius:14px;
+    backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); white-space:pre-wrap;
+  }
+  #caption.show { opacity:1; }
+  #label {
+    position:absolute; top:16px; left:50%; transform:translateX(-50%);
+    color:#cfe0ff; font-size:11px; font-weight:600; letter-spacing:2.5px;
+    text-transform:uppercase; opacity:.85; text-shadow:0 1px 6px rgba(0,0,0,.5);
+    transition:color .4s ease; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="label">JARVIS</div>
+  <div id="caption"></div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const captionEl = document.getElementById('caption');
+const labelEl = document.getElementById('label');
+
+let DPR = window.devicePixelRatio || 2;
+function resize(){ DPR = window.devicePixelRatio||2; canvas.width=innerWidth*DPR; canvas.height=innerHeight*DPR; ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize', resize); resize();
+
+const PALETTE = {
+  idle:  ['#3a7bd5','#00d2ff'], listening:['#12c2e9','#64f0c4'],
+  thinking:['#a044ff','#6a3093'], speaking:['#f7971e','#ffd200'],
+  error: ['#ff5f6d','#ffc371'],
+};
+
+let state = 'idle';
+let level = 0;          // mic/voice energy 0..1 (target)
+let levelSmooth = 0;    // smoothed
+let colorFrom = PALETTE.idle[0], colorTo = PALETTE.idle[1];
+let curFrom = hexToRgb(colorFrom), curTo = hexToRgb(colorTo);
+
+// A ring of blobs that morph — the Siri-style fluid look.
+const N = 5;
+const rings = Array.from({length:N}, (_,i)=>({
+  phase: Math.random()*Math.PI*2,
+  speed: 0.5 + i*0.16,
+  amp: 0.10 + i*0.02,
+  freq: 3 + i,
+}));
+
+function hexToRgb(h){ const n=parseInt(h.slice(1),16); return {r:n>>16&255,g:n>>8&255,b:n&255}; }
+function mix(a,b,t){ return {r:a.r+(b.r-a.r)*t, g:a.g+(b.g-a.g)*t, b:a.b+(b.b-a.b)*t}; }
+function rgb(c,a=1){ return `rgba(${c.r|0},${c.g|0},${c.b|0},${a})`; }
+
+let t=0;
+function draw(){
+  t += 0.016;
+  levelSmooth += (level - levelSmooth) * 0.18;
+
+  const tgtFrom = hexToRgb(colorFrom), tgtTo = hexToRgb(colorTo);
+  curFrom = mix(curFrom, tgtFrom, 0.06);
+  curTo   = mix(curTo,   tgtTo,   0.06);
+
+  const W=innerWidth, H=innerHeight, cx=W/2, cy=H/2;
+  ctx.clearRect(0,0,W,H);
+
+  const base = Math.min(W,H)*0.26;
+  const pulse = state==='thinking'
+      ? 0.06*Math.sin(t*3.2)
+      : (state==='speaking' ? levelSmooth*0.34 + 0.04*Math.sin(t*7)
+                            : levelSmooth*0.30);
+  const R = base*(1 + pulse) + (state==='idle' ? 3*Math.sin(t*1.3) : 0);
+
+  // Outer aura
+  let aura = ctx.createRadialGradient(cx,cy,R*0.2, cx,cy,R*2.3);
+  aura.addColorStop(0, rgb(curTo, 0.30 + levelSmooth*0.25));
+  aura.addColorStop(0.5, rgb(curFrom, 0.10));
+  aura.addColorStop(1, rgb(curFrom, 0));
+  ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(cx,cy,R*2.3,0,Math.PI*2); ctx.fill();
+
+  // Morphing fluid blobs (additive)
+  ctx.globalCompositeOperation = 'lighter';
+  for(let k=0;k<N;k++){
+    const ring = rings[k];
+    ring.phase += 0.016*ring.speed*(state==='idle'?0.6:1.4);
+    const c = k%2 ? curTo : curFrom;
+    const wob = ring.amp*(0.5 + levelSmooth);
+    ctx.beginPath();
+    const steps=90;
+    for(let i=0;i<=steps;i++){
+      const a=(i/steps)*Math.PI*2;
+      const rr = R*(1 - k*0.06) * (1 + wob*Math.sin(ring.freq*a + ring.phase)
+                 + 0.05*Math.sin((ring.freq+2)*a - ring.phase*1.3));
+      const x=cx+Math.cos(a)*rr, y=cy+Math.sin(a)*rr;
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    }
+    ctx.closePath();
+    const g = ctx.createRadialGradient(cx,cy,R*0.1, cx,cy,R*1.2);
+    g.addColorStop(0, rgb(c, 0.42));
+    g.addColorStop(1, rgb(c, 0.02));
+    ctx.fillStyle=g; ctx.fill();
+  }
+
+  // Glossy core
+  ctx.globalCompositeOperation='source-over';
+  const core = ctx.createRadialGradient(cx-R*0.28, cy-R*0.32, R*0.05, cx, cy, R);
+  core.addColorStop(0, 'rgba(255,255,255,0.95)');
+  core.addColorStop(0.18, rgb(mix(curTo,{r:255,g:255,b:255},0.4), 0.95));
+  core.addColorStop(0.6, rgb(curFrom, 0.92));
+  core.addColorStop(1, rgb({r:curFrom.r*0.5,g:curFrom.g*0.5,b:curFrom.b*0.5}, 0.96));
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.fillStyle=core; ctx.fill();
+
+  // Specular highlight
+  const hi=ctx.createRadialGradient(cx-R*0.34,cy-R*0.38,1, cx-R*0.34,cy-R*0.38,R*0.7);
+  hi.addColorStop(0,'rgba(255,255,255,0.55)'); hi.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.fillStyle=hi; ctx.fill();
+
+  // Listening: waveform ring reacting to the mic
+  if(state==='listening' || state==='speaking'){
+    ctx.strokeStyle = rgb(curTo, 0.5); ctx.lineWidth=2;
+    ctx.beginPath();
+    const steps=120, rr0=R*1.12;
+    for(let i=0;i<=steps;i++){
+      const a=(i/steps)*Math.PI*2;
+      const amp = (state==='listening'?levelSmooth:levelSmooth*0.8)
+                  * R*0.22 * Math.sin(a*9 + t*6);
+      const rr = rr0 + amp;
+      const x=cx+Math.cos(a)*rr, y=cy+Math.sin(a)*rr;
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    }
+    ctx.closePath(); ctx.stroke();
+  }
+
+  // Thinking: orbiting dots
+  if(state==='thinking'){
+    for(let i=0;i<3;i++){
+      const a = t*2.2 + i*(Math.PI*2/3);
+      const x=cx+Math.cos(a)*R*1.35, y=cy+Math.sin(a)*R*1.35;
+      ctx.beginPath(); ctx.arc(x,y,4.5,0,Math.PI*2);
+      ctx.fillStyle=rgb(curTo, 0.9); ctx.fill();
+    }
+  }
+  requestAnimationFrame(draw);
+}
+draw();
+
+function setState(s){
+  state=s;
+  const p = PALETTE[s] || PALETTE.idle;
+  colorFrom=p[0]; colorTo=p[1];
+  labelEl.textContent = {idle:'JARVIS', listening:'LISTENING', thinking:'THINKING',
+                         speaking:'SPEAKING', error:'—'}[s] || 'JARVIS';
+  labelEl.style.color = p[1];
+}
+function setCaption(text){
+  if(text){ captionEl.textContent=text; captionEl.classList.add('show'); }
+  else { captionEl.classList.remove('show'); }
+}
+
+// --- state bridge over websocket, with polling fallback ---
+function connect(){
+  const port = window.JARVIS_PORT || 8971;
+  let ws;
+  try { ws = new WebSocket('ws://127.0.0.1:'+port); } catch(e){ return setTimeout(connect,1000); }
+  ws.onmessage = ev => {
+    let m; try { m=JSON.parse(ev.data); } catch(e){ return; }
+    if(m.type==='state') setState(m.value);
+    else if(m.type==='level') level = m.value;
+    else if(m.type==='caption') setCaption(m.value);
+    else if(m.type==='speaking') { if(m.value) setState('speaking'); }
+  };
+  ws.onclose = ()=> setTimeout(connect, 1000);
+  ws.onerror = ()=> { try{ws.close();}catch(e){} };
+  window._jws = ws;
+}
+connect();
+
+// Tap the orb to talk (push-to-talk) — sent back to the app.
+document.getElementById('stage').addEventListener('click', ()=>{
+  try { window._jws && window._jws.readyState===1 && window._jws.send(JSON.stringify({type:'tap'})); } catch(e){}
+  if(window.pywebview) window.pywebview.api.tap();
+});
+</script>
+</body>
+</html>
